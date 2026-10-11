@@ -1,0 +1,3 @@
+# One genome FASTA path per line; no sample-name column.
+/my/path/to/genome/genome1.fa
+/my/path/to/genome/genome2.fa

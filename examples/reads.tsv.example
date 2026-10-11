@@ -1,0 +1,4 @@
+#sample	reads
+S1	/data/reads/S1_1.fastq.gz,/data/reads/S1_2.fastq.gz
+S2	/data/reads/S2_1.fastq,/data/reads/S2_2.fastq
+L1	/data/reads/L1.fastq.gz

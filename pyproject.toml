@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metabaw"
+version = "0.1.0"
+description = "MetaBAW: Metagenome Binning Automated Workflow"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = "MIT"
+authors = [{ name = "metaBAW contributors" }]
+dependencies = ["setuptools<82"]
+
+[project.scripts]
+metabaw = "metabaw.cli:main"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["metabaw", "metabaw.*"]
+exclude = ["tests", "tests.*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
