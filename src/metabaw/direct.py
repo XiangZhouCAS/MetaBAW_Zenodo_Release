@@ -11,6 +11,7 @@ from typing import Iterable
 from .discovery import Analysis, ReadSample, public_sample_name
 from .model import Task, topological_order
 from .metadecoder_coverage import metadecoder_executable
+from .cupy_runtime import cupy_runtime_environment
 
 
 BINNER_ORDER = (
@@ -448,7 +449,8 @@ class DirectBinBuilder:
             )
             command = (
                 f"rm -rf {q(root)} && mkdir -p {q(root)} && megahit {reads} "
-                f"--out-dir {q(root / 'megahit')} --num-cpu-threads {self._cohort_threads()} "
+                f"--out-dir {q(root / 'megahit')} --num-cpu-threads {self.options.threads} "
+                '--memory "${METABAW_MEGAHIT_MEMORY_BYTES:-0.9}" '
                 f"--min-contig-len {self.options.min_contig_length}{self._extra('megahit')} && "
                 f"{rename_command}"
             )
@@ -472,7 +474,7 @@ class DirectBinBuilder:
             command = (
                 f"rm -rf {q(root)} && mkdir -p {q(root)} && "
                 f"flye --meta {self.options.flye_read_type} {flye_reads} "
-                f"--out-dir {q(root / 'flye')} --threads {self._cohort_threads()}"
+                f"--out-dir {q(root / 'flye')} --threads {self.options.threads}"
                 f"{self._extra('flye')} && {rename_command}"
             )
             tool = "Flye"
@@ -486,13 +488,14 @@ class DirectBinBuilder:
                 stage="01_prepare",
                 command=command,
                 cwd=self.root,
+                sample=analysis.name,
                 inputs=tuple(
                     read
                     for sample in assembly_samples
                     for read in sample.reads
                 ),
                 outputs=(assembly,),
-                cpus=self._cohort_threads(),
+                cpus=self.options.threads,
                 description=(
                     f"Create {'coassembly' if analysis.combined else 'assembly'} "
                     f"{analysis.name} with {tool} from {len(assembly_samples)} {sample_word}"
@@ -1013,6 +1016,7 @@ class DirectBinBuilder:
                 )
             elif binner == "metadecoder":
                 metadecoder = q(metadecoder_executable() or "metadecoder")
+                cupy_env = cupy_runtime_environment()
                 tool_root = root / binner
                 coverage = tool_root / "coverage.tsv"
                 coverage_marker = tool_root / "coverage.v2.complete"
@@ -1021,6 +1025,7 @@ class DirectBinBuilder:
                     Task(
                         id=f"03.coverage.{binner}.{analysis.name}",
                         stage="03_binning",
+                        env=cupy_env,
                         command=internal(
                             "run-metadecoder-coverage",
                             *(argument for path in bams for argument in ("--bam", path)),
@@ -1042,6 +1047,7 @@ class DirectBinBuilder:
                     Task(
                         id=f"03.seed.{binner}.{analysis.name}",
                         stage="03_binning",
+                        env=cupy_env,
                         command=(
                             f"mkdir -p {q(tool_root)} && {metadecoder} seed --threads {self.options.threads} "
                             f"-f {q(contigs)} -o {q(seeds)}"
@@ -1077,7 +1083,7 @@ class DirectBinBuilder:
                         automatic_retries=1,
                         cpus=self.options.threads,
                         gpus=1 if metadecoder_gpu else 0,
-                        env=self._gpu_env("metadecoder"),
+                        env={**cupy_env, **self._gpu_env("metadecoder")},
                         priority=priority,
                         failure_tolerated=True,
                         description=f"Run MetaDecoder for {analysis.name}",

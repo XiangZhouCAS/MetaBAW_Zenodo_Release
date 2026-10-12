@@ -9,15 +9,17 @@ import re
 import shlex
 import sys
 
+from .terminal import plain_text
+
 
 def _detail_line(text: str) -> bool:
-    line = re.sub(r"^\[\d+:\d{2}:\d{2}\]\s*", "", text.lstrip())
+    line = re.sub(r"^\[\d+:\d{2}:\d{2}\]\s*", "", plain_text(text).lstrip())
     if line.startswith("[INPUT]"):
         return not line.startswith(("[INPUT] Named manifests:", "[INPUT] Annotation:"))
     return line.startswith((
-        "[OK]", "[CUDA ", "[GPU]", "[GPU AUTO]", "[RESOURCES]", "[WARNING]",
+        "[OK]", "[CUDA ", "[GPU]", "[GPU AUTO]", "[GPU PROBE]", "[RESOURCES]", "[WARNING]",
         "[COMEBIN CPU]", "[MEMORY ESTIMATE]", "[WORKFLOW DETAILS]",
-        "[FAILURE POLICY]", "[CONFIG]", "[KEGG]", "[PREFLIGHT]",
+        "[FAILURE POLICY]", "[CONFIG]", "[KEGG]", "[PREFLIGHT]", "[REFINEMENT THRESHOLDS]",
     ))
 
 
@@ -71,7 +73,7 @@ class StartupLog:
             invocation = getattr(self.args, "_invocation", None)
             if invocation:
                 self.handle.write(f"Command: {shlex.join(invocation)}\n")
-        self.handle.write(text)
+        self.handle.write(plain_text(text))
         self.handle.flush()
 
     def finish(self):

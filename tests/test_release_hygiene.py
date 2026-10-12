@@ -101,11 +101,14 @@ class ReleaseHygieneTests(unittest.TestCase):
     def test_build_runs_from_minimal_external_snapshot(self):
         temporary = self.parent / "build-temp"
         temporary.mkdir()
+        logo = self.root / "metabaw_title_logo.png"
+        logo.write_bytes(b"logo fixture")
         def build(command, **options):
             self.assertNotEqual(options["cwd"], self.root)
             snapshot = Path(command[-1])
             self.assertFalse(snapshot.is_relative_to(self.root))
             self.assertTrue((snapshot / "src" / "metabaw" / "__init__.py").is_file())
+            self.assertEqual((snapshot / logo.name).read_bytes(), logo.read_bytes())
             self.assertFalse((snapshot / "tests").exists())
             self.assertFalse((snapshot / "examples").exists())
             destination = Path(command[command.index("--outdir") + 1])
@@ -130,7 +133,7 @@ class ReleaseHygieneTests(unittest.TestCase):
         self.assertEqual(verify_wheel(wheel, self.root), (7, 1))
         for extra in (
             "metabaw_annotation_result/start_info.txt", "tests/test_example.py",
-            "metabaw/__pycache__/__init__.pyc", "README.md", "unexpected.dist-info/file.txt",
+            "metabaw/__pycache__/__init__.pyc", "README.md", "metabaw_title_logo.png", "unexpected.dist-info/file.txt",
         ):
             with self.subTest(extra=extra):
                 wheel = self.wheel({extra: b"unwanted"})

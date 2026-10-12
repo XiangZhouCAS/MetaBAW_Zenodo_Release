@@ -404,6 +404,8 @@ class NamedInputTests(unittest.TestCase):
         self.assertIn("01.assemble.L", by_id)
         self.assertIn("01.assemble.outside", by_id)
         for name in ("A_clean", "B", "L", "outside"):
+            self.assertEqual(by_id[f"01.assemble.{name}"].sample, name)
+            self.assertEqual(by_id[f"01.assemble.{name}"].cpus, _args.threads_per_task)
             self.assertEqual(
                 by_id[f"01.prepare.{name}"].deps,
                 (f"01.assemble.{name}",),

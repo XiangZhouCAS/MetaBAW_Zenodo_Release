@@ -1,4 +1,4 @@
-# MetaBAW 0.1.0
+# ![MetaBAW](metabaw_title_logo.png)
 
 MetaBAW (Metagenome Binning Automated Workflow) is an integrated workflow for
 building and annotating metagenome-assembled genome (MAG) datasets from
@@ -31,10 +31,8 @@ file names. This makes mixed projects and reproducible reruns easier to audit.
 - [Dependencies and databases](#dependencies-and-databases)
 - [Reports, logs, and reproducibility](#reports-logs-and-reproducibility)
 - [Temporary files and resume behavior](#temporary-files-and-resume-behavior)
-- [Troubleshooting](#troubleshooting)
 - [Examples](#examples)
 - [Development verification](#development-verification)
-- [Citation and support](#citation-and-support)
 - [License](#license)
 
 ## Quick start
@@ -162,86 +160,6 @@ supported missing components after confirmation. Installation requires network
 access and permission to create the selected environments and database paths.
 On HPC systems, prepare dependencies in an appropriate setup session before
 submitting analysis jobs; `bin` and `annotation` never prompt for installation.
-
-### MetaDecoder downloads and local installation
-
-Approved MetaDecoder installation uses the upstream 1.2.2 wheel in MetaBAW's
-main Python environment. Release downloads use a 120-second socket timeout
-and at most two attempts per official route. If GitHub Releases is unavailable,
-the installer tries the official GitHub release-asset API with binary-content
-negotiation. Both routes can still depend on GitHub's asset CDN; this cannot
-overcome a server firewall that blocks all GitHub downloads. No third-party
-proxy, unrelated PyPI package or base-environment executable is substituted.
-
-Every downloaded, cached or explicitly supplied wheel must match the pinned
-upstream filename, size and SHA-256. A checksum mismatch stops installation.
-Successful downloads are atomically cached under
-`$XDG_CACHE_HOME/metabaw/downloads`, or `~/.cache/metabaw/downloads` when
-`XDG_CACHE_HOME` is unset. Later installation attempts reuse only a verified
-cache entry. Partial downloads are temporary and are not treated as complete
-packages. These files are not stored in the workflow results or release wheel.
-
-For a server without GitHub access, obtain
-[`metadecoder-1.2.2-py3-none-any.whl` from the official release](https://github.com/liu-congcong/MetaDecoder/releases/tag/v1.2.2)
-on a machine with access, transfer the file to the server, and run:
-
-```bash
-conda activate metabaw
-export METABAW_METADECODER_WHEEL=/absolute/path/metadecoder-1.2.2-py3-none-any.whl
-metabaw check --scope bin --require-cuda
-```
-
-After approval, this uses the local wheel without contacting GitHub. The pinned
-SHA-256 is
-`131421c57ced53d4947b7648ba1fd36c288b9b54107fe2b6179552094f4c61a7`,
-as published in the upstream release-asset metadata. An explicit local file that
-is missing, incorrectly named or corrupt is rejected without a network fallback.
-This avoids only the MetaDecoder wheel download: its numerical dependencies,
-other tools, databases and CuPy/CUDA libraries must still be installed or made
-available from appropriate package sources. A local wheel alone does not make
-the complete dependency check offline or guarantee GPU readiness.
-
-Pip installation transactions also default to a 120-second socket timeout and
-five connection retries. Explicit `PIP_TIMEOUT`/`PIP_DEFAULT_TIMEOUT` and
-`PIP_RETRIES` environment settings are preserved; the timeout also applies to
-MetaDecoder wheel downloads, whose own attempts remain capped at two per route.
-Standard HTTPS proxy settings, `PIP_PROXY`, `PIP_CERT` and `PIP_CLIENT_CERT` are
-honored during these downloads. HTTPS certificate verification is never disabled.
-No global pip configuration is edited. Unset `METABAW_METADECODER_WHEEL` to
-return to verified-cache/official-download selection.
-
-`--essential` checks the default binning and annotation dependency profiles.
-`--scope` accepts only `bin` and `annotation`.
-`--scope bin` checks the default short-read binning profile, not every optional
-binner or QC module. Use `--all` for all supported components, or explicitly
-provide environment flags for selected isolated tools. The actual workflow
-preflight checks the resolved analysis rather than assuming that a prior
-default-profile check is sufficient.
-
-Every `bin` and `annotation` invocation, including resumed runs,
-performs a mandatory dependency preflight before starting workflow tasks. The
-checks follow the resolved input types, assemblies, selected binners, refiner,
-quality-control options, and enabled annotation modules. They cover executable
-availability, supported runtime checks, selected isolated environments, R
-packages, MAGScoT scripts/marker HMMs, and required database assets. New GTDB-Tk
-classification also requires its ANI sketches and tree RED reference assets.
-
-Missing, empty, unreadable, or invalid required assets are reported with
-`[MISSING]`, including the program/database name and available file/path details.
-All detected failures are collected in `<output>/start_info.txt`; the command
-exits with a nonzero status and does not start analysis tasks. Workflow startup
-does not prompt for installation, download databases, or save global dependency
-settings. Use `metabaw check` to install/configure components, then rerun.
-Disabled modules are not checked; complete taxonomy supplied through
-`--gtdbtk_res` does not require GTDB-Tk or its database. Hosts without a usable
-NVIDIA GPU can run on CPU; `--no-gpu` explicitly requests CPU execution.
-When a GPU is visible and MetaDecoder is selected for GPU execution, its CuPy
-runtime must pass validation before binning starts.
-
-The KEGG description table is validated during preflight. For older KOfam
-databases, a missing `K.descript.txt` can still be derived locally from a usable
-`ko_list` without downloading data. Missing individual KO descriptions remain
-`NA`; a missing/unusable whole table stops the run before annotation begins.
 
 ## Command help
 
@@ -529,8 +447,7 @@ Rejected source bins are never substituted into the catalogue and thresholds
 are not relaxed further. Original bins remain under `bin_files/`. If all samples
 are empty, collection stops with `No refined FASTA bins were collected` before
 QC. Native MAGScoT output is also retained in
-`<tmp>/work/refinement/<sample>/magscot.native.log`. Historical compatibility and
-one-time checkpoint migrations are described in [release notes](RELEASE_NOTES.md).
+`<tmp>/work/refinement/<sample>/magscot.native.log`.
 
 In `quality_control_files/rna_quality.tsv`, `pass` is `Not filtered` when
 neither `--trna-pass` nor `--rrna-pass` is enabled. RNA predictions and tool
@@ -896,52 +813,24 @@ metabaw_annotation_result/
 `-t/--threads` is the total workflow CPU budget. `--task` is the maximum number
 of samples or MAGs processed concurrently. MetaBAW divides the total thread
 budget across active sample slots; it does not multiply `-t` by `--task`.
-This division applies to sample-level mapping, binning and
+CPU requests are limited to the permitted CPU affinity/cgroup-quota capacity.
+The 80% safety ceiling applies to RAM and VRAM, not CPU threads.
+This division applies to sample-level MEGAHIT/Flye assembly, mapping, binning and
 refinement. After refined MAGs from all samples are collected, CheckM/CheckM2,
 GUNC, GTDB-Tk domain identification, RNA QC and Galah/dRep use the full
 effective workflow thread budget. For example, `--threads 128 --task 4`
 allocates 32 threads per sample and 128 threads to each global QC or
-dereplication task, provided the 80% CPU cap permits 128 threads. Each global
+dereplication task, provided the available CPU capacity permits 128 threads. Each global
 task reserves that full budget, so global assessments do not each run with
 128 threads simultaneously. RNA QC divides its global budget among candidate
 MAGs, not original samples. Single-threaded collection, export and report
 helpers still reserve one CPU. MetaWRAP with CheckM reuses its refinement
 quality reports without a redundant global CheckM run.
 
-Standalone CheckM QC runs through a process-local compatibility launcher in
-the Python environment selected by the native `checkm` console script. Older
-CheckM statistics readers use `ast.literal_eval`, which cannot directly parse
-NumPy 2 scalar representations such as `np.float64(2500.5)`. The launcher
-accepts only whitelisted finite numeric/Boolean scalar literals in these
-statistics; arbitrary expressions, unknown calls and malformed records still
-fail. It does not use `eval`, change numerical settings or edit installed
-CheckM files. Native marker selection, completeness/contamination estimates,
-thread allocation and final filters remain unchanged. The task log records
-the resolved native command and interpreter. This wrapper is not applied to
-CheckM2 or CheckM already run inside MetaWRAP's isolated environment.
-
-For binning, the total request is capped at 80% of the permitted logical CPU
-capacity, accounting for Linux affinity and readable cgroup CPU quotas. This
-is a capacity limit, not a measurement of momentary idle CPU utilization.
-Requests below the cap are preserved. Threads are divided equally across
-sample slots, rounding down. For example, `-t 64 --task 4` permits four
-16-thread sample tasks on a host with at least 80 permitted logical CPUs.
-Linux task trees receive disjoint CPU affinity sets, inherited by workers.
-
-All six binners support independent-sample scheduling. Ready tasks can run
-across different binner/stage progress groups; actual data dependencies and
-resource reservations still apply. `--task 4` is a maximum, not a guarantee
-that four tasks are ready or have sufficient resources. A cohort-wide task
-remains one biological analysis and may use the full CPU budget after its
-dependencies finish; it is not split into independent sample analyses.
-
-Annotation passes `-t/--threads` directly to GTDB-Tk's `--cpus`: for example,
-`--threads 64 --task 4` gives GTDB-Tk 64 CPUs, while sample-level tasks receive
-16 threads each. There is no separate `--gtdbtk-threads` option or 16-thread
-cap. The scheduler reserves the full CPU budget for GTDB-Tk to prevent
-concurrent tasks from exceeding it. Its pplacer phase remains single-threaded
-with disk scratch; higher `--threads` values can increase memory use in other
-GTDB-Tk phases.
+Independent samples and distinct coassembly groups can assemble concurrently
+up to `--task`. Each assembler uses its allocated sample thread/RAM share.
+MEGAHIT's graph memory budget uses 90% of that RAM share, leaving room for
+other allocations; the combined process-tree memory guard remains active.
 
 ### System memory
 
@@ -955,20 +844,6 @@ slots. A cohort-wide task reserves the shared budget and waits for other
 reservations to finish. External memory use can further reduce admission
 budgets while the workflow runs. Annotation retains its existing total-limit
 scheduling behavior.
-Runtime headroom calculations add MetaBAW's measured task memory back to free
-memory before applying 80%, so its own allocations are not mistaken for new
-external consumption. GPU accounting uses the same principle per card.
-
-On Linux, MetaBAW monitors proportional set size (PSS) from `/proc`. RSS is
-used only as a conservative upper bound when PSS is unavailable. Confirmed
-workflow or per-task share breaches stop active process groups and block
-pending tasks. PSS is required when RSS alone cannot establish that a task is
-within its share. Secondary address-space limits are not applied to GPU tasks,
-because CUDA reserves virtual address ranges that do not represent RAM usage.
-
-Generated GTDB-Tk classification has a 160 GiB preflight floor, uses one
-pplacer CPU, and enables disk scratch. This floor is a configuration check, not
-a predicted peak. A complete `--gtdbtk_res` skips this requirement.
 
 ### GPU execution
 
@@ -982,78 +857,6 @@ when available. Several tasks may share a card if their reservations fit.
 Every card also stays within its own 80%-of-free-VRAM ceiling. Equal shares
 may be reduced further to fit heterogeneous cards: one process cannot pool
 the memory of multiple GPUs. GPUs with unknown free VRAM are not used.
-
-MetaDecoder's cluster step uses its CuPy GPU implementation when a compatible
-CuPy/CUDA runtime and memory-pool controls pass validation. Its coverage and
-marker-seed steps remain CPU tasks. MetaDecoder is installed and resolved in
-MetaBAW's main Python 3.11 environment: a base/foreign Python executable on
-PATH does not satisfy this requirement. Coverage, marker seeds, clustering and
-the CuPy probe use the same owned launcher; logs print its executable and Python.
-Python 3.12 is not required. See the
-[upstream Python requirement](https://github.com/liu-congcong/MetaDecoder/blob/main/pyproject.toml).
-
-`metabaw check --scope bin`, the default essential check and `--all` validate
-CuPy separately from PyTorch. With a visible NVIDIA GPU, a missing CuPy runtime
-offers an installation plan in the main Conda prefix after confirmation. The
-plan installs one CuPy 13.x distribution with CUDA libraries, prefers an
-existing Conda CUDA version or the working main PyTorch CUDA version, and
-stays within the driver's advertised CUDA capability. It freezes existing
-packages and Python, and does not install into base, uninstall another CuPy
-distribution, or retry in a different environment if solving fails. Existing
-broken/conflicting CuPy packages require repair with their original package
-manager; they are not silently overlaid. This uses the
-[official CuPy Conda installation method](https://docs.cupy.dev/en/v13.6.0/install.html#installing-cupy-from-conda-forge).
-
-After installation, the same main interpreter must pass GPU allocation,
-kernel/reduction, linear-algebra and memory-pool-limit tests. With a visible
-GPU, the check fails if MetaDecoder CuPy remains unusable, even if PyTorch
-passes and `--require-cuda` is omitted. Binning also stops before tasks start
-instead of silently changing MetaDecoder to CPU. Use `--no-gpu` for an
-intentional CPU run; no installer runs during binning. `--require-cuda` further
-requires a usable driver and every selected GPU runtime. Actual Linux/GPU
-readiness must be confirmed on the target server, not inferred from unit tests.
-Genuine CPU/GPU or executable changes may invalidate affected MetaDecoder
-checkpoints; resource-budget changes alone do not.
-Use one CuPy package matching the selected CUDA runtime, as described in
-the [official MetaDecoder GPU instructions](https://github.com/liu-congcong/MetaDecoder#the-gpu-version-of-metadecoder).
-
-VAMB, SemiBin2, COMEBin, and LorBin use GPU execution only when both their CUDA
-runtime and conservative memory minimum pass validation. COMEBin's minimum is
-derived from `--batch-size`; its GPU default is 1024. When COMEBin runs on CPU
-and no batch size was explicitly supplied, MetaBAW uses the safer batch size
-128.
-
-GPU Python children inherit task-specific PyTorch allocator or CuPy default
-memory-pool caps. MetaBAW leaves up to 512 MiB (at most 10% of the share) outside
-the allocator cap for CUDA context/library overhead. Task-tree VRAM is also
-sampled with `nvidia-smi`; unreserved GPU use, wrong-device use, unreadable
-GPU accounting, or confirmed share/aggregate breaches stop the workflow.
-CPU tasks receive an empty CUDA visibility mask to prevent untracked GPU use.
-When free VRAM changes, equal shares are recalculated between GPU batches,
-without changing the caps of already running tasks.
-
-These are admission reservations, native allocator controls, and sampled
-process-tree guards, not kernel-enforced instantaneous RAM/VRAM isolation.
-CUDA contexts, custom allocators and library workspaces can allocate outside
-the pools, and external jobs can change available resources between samples.
-Temporary spikes cannot be ruled out. For hard isolation, use administrator-
-configured cgroups for RAM and an appropriate GPU partitioning mechanism.
-Test concurrency on the target Linux server before scaling expensive runs.
-
-LorBin uses an in-memory compatibility launcher for known neighbor-graph,
-clustering-boundary and CPU nearest-centroid failures in its pinned runtime.
-It preserves distance metrics, marker-based scoring, CUDA training and native
-process-count settings; it does not edit installed LorBin files or fabricate
-bins. A small-sample guard leaves a lone unassigned contig unbinned. During CPU
-clustering only, exact chunked distance calculations and single-threaded native
-pools avoid the affected accelerated backend; settings are restored afterward.
-The task log identifies this runtime with `[LORBIN COMPAT]`.
-
-Failed LorBin tasks are not automatically retried, even when `--retries` is set,
-because recreating the output directory would erase the retained `embedding.csv`.
-Inspect the log and preserve intermediates before manually resuming. CPU thread
-settings alone do not invalidate completed tasks; changing CPU/GPU mode, inputs
-or analysis options can. See [release notes](RELEASE_NOTES.md) for repair details.
 
 ## Dependencies and databases
 
@@ -1286,26 +1089,6 @@ fail before publication. Versioned completion evidence prevents reuse of older
 unchecked tables. This does not repair corrupt BAM data: `samtools quickcheck`
 checks headers and EOF, not every internal block.
 
-## Troubleshooting
-
-| Symptom | What to check |
-|---|---|
-| `[MISSING]` before tasks start | Read `start_info.txt`; configure the selected software, environment and database paths with `metabaw check` |
-| Ambiguous Conda environment name | Select its absolute prefix with the corresponding `check --*-env` option |
-| Fewer tasks than `--task` run concurrently | Check ready dependencies and CPU/RAM/VRAM reservations; `--task` is a ceiling, not a guarantee |
-| GPU branch falls back to CPU | Read the runtime/allocation diagnostics and per-slot VRAM budget; MetaDecoder needs CuPy in its actual executable environment |
-| Resume repeats a completed stage | Inspect `resume_diagnostics.json` for changed recipes, missing outputs or migration evidence; preserve state and original logs |
-| CheckM `malformed node or string` in statistics parsing | This edition safely handles supported NumPy scalar literals; inspect the resolved launcher and task log if an unsupported or corrupt record still fails |
-| MetaDecoder coverage fails after rebuilding BAMs | Fresh sidecars are automatic; validate the BAM and inspect the coverage log rather than reusing old custom indexes |
-| Refinement returns no bins | A validated empty result is allowed per sample; an all-empty catalogue stops before QC, without substituting rejected bins |
-| `pass_gunc=unscored` despite a GUNC report | Check reference representation and call validity; unscored is not a demonstrated pass |
-| Niche output is absent | Check the four-MAG/four-sample requirement and `niche_status.log`, or whether `--no-niche` was set |
-| Only generalist/specialist niche labels | Occupancy mode is binary; CV mode produces ranked tails plus intermediates |
-
-For failures after tasks start, read the task log under `<tmp>/runtime/logs/`
-alongside `workflow_summary.json`. Preserve failed-run intermediates before
-manual cleanup or reruns, particularly for LorBin.
-
 ## Examples
 
 Current manifest and command examples are provided under `examples/`:
@@ -1350,24 +1133,6 @@ repository, run `python -B release.py` first. README changes are included in
 wheel metadata, so rebuild the wheel and checksum when updating documentation.
 Automated tests use fixtures and synthetic workers unless stated otherwise;
 passing them is not a replacement for native Linux/GPU biological validation.
-
-## Citation and support
-
-When reporting an analysis, identify MetaBAW 0.1.0, the
-specific source revision or wheel checksum, native tool versions, database
-releases, sample manifests and relevant parameters. Cite the upstream tools and
-databases actually used. Niche provenance records its methodological references
-and distinguishes the optional CV correction from the MetaBAW rank-quartile rule.
-No MetaBAW publication DOI is supplied in this distribution; do not substitute
-an unrelated DOI or treat this software-version statement as a paper citation.
-
-If a project issue tracker is available, include the MetaBAW version, exact
-command, operating system, affected stage, relevant task-log excerpt and
-`resume_diagnostics.json` for resume problems. Remove credentials, confidential
-paths and sensitive sample information; do not upload raw reads or full
-databases merely to report an error. For local maintenance, retain `tests/` and
-the release/check scripts; `AGENTS.md` documents assistant maintenance rules
-and is not a runtime dependency.
 
 ## License
 

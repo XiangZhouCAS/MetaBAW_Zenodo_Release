@@ -71,15 +71,15 @@ def snapshot(pid, parent=1, pss=0, rss=None):
 
 class SharedPlanningTests(unittest.TestCase):
     def test_over_request_is_capped_then_divided_equally(self):
-        plan = plan_resources(128, 200, 4, 16, cpu_snapshot=(tuple(range(128)), 128), memory_snapshot=100)
-        self.assertEqual(plan.threads, 102)
+        plan = plan_resources(256, 200, 4, 16, cpu_snapshot=(tuple(range(128)), 128), memory_snapshot=100)
+        self.assertEqual(plan.threads, 128)
         self.assertEqual(plan.memory_gib, 80)
         self.assertEqual(plan.memory_per_task_gib, 20)
-        args = Namespace(threads=128, max_memory=200, task=4, resource_safety=True)
+        args = Namespace(threads=256, max_memory=200, task=4, resource_safety=True)
         with patch("metabaw.cli.plan_resources", return_value=plan), redirect_stdout(io.StringIO()):
-            self.assertEqual(_configure_thread_budget(args, 16), 25)
+            self.assertEqual(_configure_thread_budget(args, 16), 32)
         self.assertEqual(args.concurrent_sample_limit, 4)
-        self.assertEqual(args.requested_threads, 128)
+        self.assertEqual(args.requested_threads, 256)
         self.assertEqual(args.max_memory, 80)
 
     def test_smaller_user_request_and_slot_count_are_preserved(self):
@@ -90,6 +90,14 @@ class SharedPlanningTests(unittest.TestCase):
         with patch("metabaw.resources.available_memory_gib", return_value=None):
             with self.assertRaisesRegex(ValueError, "Cannot measure"):
                 plan_resources(8, 32, 4, 16, cpu_snapshot=(tuple(range(128)), 128))
+
+    def test_one_cpu_is_usable_and_ram_still_has_its_80_percent_limit(self):
+        plan = plan_resources(128, 200, 5, 5,
+                              cpu_snapshot=((7,), 1), memory_snapshot=100)
+        self.assertEqual((plan.threads, plan.slots, plan.cpu_ids), (1, 1, (7,)))
+        self.assertEqual(plan.memory_gib, 80)
+        with self.assertRaisesRegex(ValueError, "affinity/quota"):
+            plan_resources(128, 200, 5, 5, cpu_snapshot=((7,), 0.9), memory_snapshot=100)
 
     def test_available_ram_uses_free_memory_and_nested_cgroup_headroom(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -118,7 +126,7 @@ class SharedPlanningTests(unittest.TestCase):
                 ids, capacity = available_cpus((root,))
             self.assertEqual(capacity, 6.5)
             plan = plan_resources(128, 100, 4, 16, cpu_snapshot=(ids, capacity), memory_snapshot=100)
-            self.assertEqual(plan.threads, 5)
+            self.assertEqual(plan.threads, 6)
             self.assertTrue(set(plan.cpu_ids).issubset(ids))
 
     def test_gpu_request_is_aggregate_and_supports_shared_single_gpu(self):
@@ -224,14 +232,14 @@ class GlobalStageThreadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             plan = plan_resources(128, 80, 4, 4,
-                                  cpu_snapshot=(tuple(range(128)), 128), memory_snapshot=100)
-            self.assertEqual((plan.threads, plan.slots), (102, 4))
+                                  cpu_snapshot=(tuple(range(128)), 127), memory_snapshot=100)
+            self.assertEqual((plan.threads, plan.slots), (127, 4))
             opts = replace(options(root, "metabat2", gpu=False),
                            threads=plan.threads // plan.slots, total_threads=plan.threads,
                            run_gunc=True, run_trna=True, run_rrna=True)
             tasks = self.plan(root, opts)
-            self.assertEqual(tasks["03.bin.metabat2.S0"].cpus, 25)
-            self.assert_global_budget(tasks, opts, 102)
+            self.assertEqual(tasks["03.bin.metabat2.S0"].cpus, 31)
+            self.assert_global_budget(tasks, opts, 127)
 
     def test_single_slot_and_legacy_options_without_total_budget(self):
         for total_threads in (32, None):

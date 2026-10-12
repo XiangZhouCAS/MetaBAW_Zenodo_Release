@@ -75,7 +75,7 @@ class ReadmeDocumentationTests(unittest.TestCase):
             re.sub(r"[^\w -]", "", heading.lower()).replace(" ", "-")
             for heading in re.findall(r"^#{1,6} (.+)$", prose, re.M)
         }
-        links = re.findall(r"(?<!!)\[[^\]]+\]\(([^)]+)\)", prose)
+        links = re.findall(r"\[[^\]]+\]\(([^)]+)\)", prose)
         self.assertGreaterEqual(len(links), 15)
         for target in links:
             with self.subTest(target=target):

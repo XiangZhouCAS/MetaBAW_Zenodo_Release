@@ -160,6 +160,7 @@ class ResourcePlanningTests(unittest.TestCase):
                 threads_per_task=42,
                 task=3,
                 concurrent_sample_limit=3,
+                resource_safety=True,
                 max_memory=100.0,
                 gpu=False,
                 cuda_device_count=0,
@@ -213,6 +214,9 @@ class ResourcePlanningTests(unittest.TestCase):
                 (root / "output" / "resolved_parameters.tsv").exists()
             )
             self.assertEqual(manifest["resources"]["total_memory_gb"], 100.0)
+            self.assertEqual(manifest["resources"]["cpu_capacity_fraction"], 1.0)
+            self.assertEqual(manifest["resources"]["memory_safety_fraction"], 0.8)
+            self.assertEqual(manifest["resources"]["gpu_safety_fraction"], 0.8)
             self.assertEqual(
                 manifest["resources"]["memory_scope"],
                 "combined_pss_of_workflow_task_process_trees",

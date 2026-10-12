@@ -23,6 +23,10 @@ class StartupLogTests(unittest.TestCase):
         hidden = ["[INPUT] S1: short; aligner=bowtie2", "[RESOURCES] CPU budget",
                   "[OK] COMEBin environment", "[CUDA OK] driver", "[GPU] slots",
                   "[WARNING] CPU fallback", "[COMEBIN CPU] batch size=128",
+                  "[GPU PROBE] MetaDecoder executable=/env/bin/metadecoder",
+                  "[REFINEMENT THRESHOLDS] magscot: completeness >= 40%; contamination <= 12%",
+                  "[00:00:00] [GPU PROBE] Python launcher=/env/bin/python",
+                  "[00:00:00] [REFINEMENT THRESHOLDS] metawrap: relative relaxation=20%",
                   "[00:00:00] [MEMORY ESTIMATE] memory", "[00:00:00] [WORKFLOW DETAILS] methods",
                   "[00:00:00] [FAILURE POLICY] strict", "[CONFIG] database", "[KEGG] metadata"]
         visible = ["[INPUT] Named manifests: 2 samples", "[COASSEMBLY] group1: S1,S2",
@@ -32,7 +36,9 @@ class StartupLogTests(unittest.TestCase):
         def command(args):
             for line in hidden + visible:
                 print(line, flush=True)
-            print("[WARNING] stderr detail", file=sys.stderr, flush=True)
+            for line in ("[WARNING] stderr detail", "[GPU PROBE] stderr detail",
+                         "[REFINEMENT THRESHOLDS] stderr detail"):
+                print(line, file=sys.stderr, flush=True)
             print("Install missing dependencies? [y/N] ", end="", flush=True)
             print("[ERROR] fatal", file=sys.stderr, flush=True)
             finish_startup(args)
@@ -53,7 +59,10 @@ class StartupLogTests(unittest.TestCase):
         self.assertIn("Install missing dependencies? [y/N]", stdout.getvalue())
         self.assertIn("[ERROR] fatal", stderr.getvalue())
         self.assertIn("[ERROR] fatal", record)
-        self.assertNotIn("[WARNING] stderr detail", stderr.getvalue())
+        for line in ("[WARNING] stderr detail", "[GPU PROBE] stderr detail",
+                     "[REFINEMENT THRESHOLDS] stderr detail"):
+            self.assertIn(line, record)
+            self.assertNotIn(line, stderr.getvalue())
         self.assertIn("[STEP 1/10]", stdout.getvalue())
         self.assertIn("[WARNING] runtime warning", stderr.getvalue())
         self.assertNotIn("[STEP 1/10]", record)
@@ -131,6 +140,7 @@ class StartupLogTests(unittest.TestCase):
 
         def preflight(*args):
             print("[OK] test environment", flush=True)
+            print("[GPU PROBE] test runtime", flush=True)
             print("[WARNING] test fallback", file=sys.stderr, flush=True)
 
         def execute(tasks, **kwargs):
@@ -159,6 +169,12 @@ class StartupLogTests(unittest.TestCase):
             self.assertIn("[OK] test environment", record)
             self.assertIn("[WARNING] test fallback", record)
             self.assertIn("[RESOURCES]", record)
+            self.assertIn("[GPU PROBE] test runtime", record)
+            if module == "bin":
+                self.assertIn("[REFINEMENT THRESHOLDS] magscot:", record)
+            for stream in (stdout.getvalue(), stderr.getvalue()):
+                self.assertNotIn("[GPU PROBE]", stream)
+                self.assertNotIn("[REFINEMENT THRESHOLDS]", stream)
             self.assertNotIn("[OK]", stdout.getvalue())
             self.assertNotIn("test fallback", stderr.getvalue())
             self.assertIn("MetaBAW is Running.", stdout.getvalue())

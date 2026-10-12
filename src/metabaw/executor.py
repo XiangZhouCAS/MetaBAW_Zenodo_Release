@@ -867,6 +867,12 @@ def _execute_task(
     task_memory_gb = task.memory_limit_gb if task.memory_limit_gb is not None else max_memory_gb
     if task_memory_gb is not None and task.enforce_memory_limit:
         environment["METABAW_MAX_MEMORY_GB"] = f"{task_memory_gb:g}"
+        if task.id.startswith(("01.assemble.", "01.coassemble.")):
+            # MEGAHIT's native memory option covers graph construction only.
+            # Leave room within this sample's RAM share for other allocations.
+            environment["METABAW_MEGAHIT_MEMORY_BYTES"] = str(
+                max(1, int(task_memory_gb * 1024**3 * 0.9))
+            )
     started_at = _local_time()
     with log_path.open("w", encoding="utf-8", errors="replace") as log:
         log.write(
@@ -885,6 +891,8 @@ def _execute_task(
             f"{max_memory_gb if max_memory_gb is not None else 'unlimited'}\n"
         )
         log.write(f"# task_memory_share_gb: {task_memory_gb}\n")
+        if "METABAW_MEGAHIT_MEMORY_BYTES" in environment and "--num-cpu-threads" in task.display_command():
+            log.write(f"# megahit_graph_memory_bytes: {environment['METABAW_MEGAHIT_MEMORY_BYTES']}\n")
         log.write(f"# cpu_affinity: {','.join(map(str, task.cpu_affinity)) or 'not explicitly assigned'}\n")
         if hook_directory is not None:
             log.write(f"# gpu_python_limit_hook: {hook_directory}; inherited by isolated Python workers\n")

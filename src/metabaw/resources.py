@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import re
 
-SAFETY_FRACTION = 0.8
+SAFETY_FRACTION = 0.8  # RAM and VRAM only; CPU uses the permitted capacity.
 GIB = 1024**3
 
 
@@ -109,10 +109,10 @@ def plan_resources(threads: int, memory_gib: float, slots: int, workloads: int,
     identifiers, capacity = cpu_snapshot if cpu_snapshot is not None else available_cpus()
     free = memory_snapshot if memory_snapshot is not None else available_memory_gib()
     if free is None or free <= 0:
-        raise ValueError("Cannot measure current available RAM; refusing an unverifiable 80% resource budget")
-    cpu_limit = math.floor(capacity * SAFETY_FRACTION)
+        raise ValueError("Cannot measure current available RAM; refusing an unverifiable 80% RAM budget")
+    cpu_limit = min(len(identifiers), math.floor(capacity))
     if cpu_limit < 1:
-        raise ValueError("Less than one CPU fits the 80% budget; allocate at least two logical CPUs")
+        raise ValueError("Less than one CPU is permitted by affinity/quota; allocate at least one logical CPU")
     actual_threads = min(threads, cpu_limit)
     actual_slots = max(1, min(slots, workloads, actual_threads))
     return ResourcePlan(tuple(identifiers[:actual_threads]), capacity, threads, actual_threads,

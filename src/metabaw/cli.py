@@ -16,6 +16,7 @@ import time
 from typing import Callable, Sequence, TypeVar
 
 from . import __version__
+from .terminal import status_row, status_tag
 from .relocation import ResumeLayout
 from .direct import (
     BINNER_ORDER,
@@ -417,12 +418,20 @@ def _offer_cupy_repair(
         )
         return status
     try:
-        command = main_cupy_install_command(host.advertised_cuda_version, preferred_cuda)
-        print(f"[CUPY INSTALL PLAN] {shlex.join(command)}", flush=True)
+        plan = main_cupy_install_command(host.advertised_cuda_version, preferred_cuda)
+        print(f"[CUPY CUDA TARGET] nvidia-smi CUDA {plan.cuda_version}; "
+              f"library-only prefix {plan.runtime_prefix}; Python {sys.executable}", flush=True)
+        for command in plan.commands:
+            print(f"[CUPY INSTALL PLAN] {shlex.join(command)}", flush=True)
         if not confirm_install(f"Install CuPy and its CUDA libraries in the MetaBAW environment {sys.prefix}"):
             return status
-        install_main_cupy_runtime(command)
+        install_main_cupy_runtime(plan)
         repaired = _metadecoder_cuda_status()
+        expected = sum(int(part) * multiplier for part, multiplier
+                       in zip(plan.cuda_version.split("."), (1000, 10)))
+        if repaired.available and repaired.cuda_version != str(expected):
+            raise RuntimeError(f"CuPy loaded CUDA runtime {repaired.cuda_version}, "
+                               f"but nvidia-smi target {plan.cuda_version} requires {expected}")
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         print(f"[CUDA REPAIR FAILED] MetaDecoder: {exc}", file=sys.stderr, flush=True)
         return status
@@ -504,8 +513,8 @@ def _configure_thread_budget(
         args.resource_plan = plan
         args.requested_threads, args.requested_max_memory = args.threads, args.max_memory
         args.threads, args.max_memory = plan.threads, plan.memory_gib
-        print(f"[RESOURCE CAP] 80% of available resources: CPU capacity={plan.available_cpu_capacity:g}; "
-              f"RAM available={plan.memory_available_gib:.3f} GiB; "
+        print(f"[RESOURCE CAP] CPU capacity={plan.available_cpu_capacity:g}; "
+              f"RAM available={plan.memory_available_gib:.3f} GiB; RAM cap=80%; "
               f"requested CPU/RAM={plan.threads_requested}/{plan.memory_requested_gib:g} GiB; "
               f"effective CPU/RAM={plan.threads}/{plan.memory_gib:.3f} GiB; "
               f"RAM share={plan.memory_per_task_gib:.3f} GiB per sample slot.", flush=True)
@@ -1315,7 +1324,7 @@ def _require_database(
 ) -> Path:
     """Validate existing reference assets; never download during a run."""
     if current is not None and validator(current):
-        print(f"[OK] {name} database: {current}", flush=True)
+        print(f"{status_tag('OK')} {name} database: {current}", flush=True)
         return current
     detail = str(current) if current is not None else "not configured"
     if current is not None:
@@ -1393,7 +1402,7 @@ class _WorkflowPreflight:
         except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
             problem = f"{label}: {exc}"
             self.problems.append(problem)
-            print(f"[MISSING] {problem}", file=sys.stderr, flush=True)
+            print(f"{status_tag('MISSING', stream=sys.stderr)} {problem}", file=sys.stderr, flush=True)
             return None
 
     def database(
@@ -1451,7 +1460,7 @@ def _require_magscot_files(directory: Path) -> Path:
             missing.append(f"{path} ({exc})")
     if missing:
         raise RuntimeError("missing/invalid files: " + ", ".join(missing))
-    print(f"[OK] MAGScoT script and marker HMMs: {directory}", flush=True)
+    print(f"{status_tag('OK')} MAGScoT script and marker HMMs: {directory}", flush=True)
     return directory
 
 
@@ -1627,12 +1636,12 @@ def _check_software_interactively(
     for profile, packages in missing_r.items():
         for package in packages:
             print(
-                f"[MISSING] R package {package:<24} required by {profile}",
+                status_row("MISSING", f"R package {package}", f"required by {profile}"),
                 flush=True,
             )
     for issue in runtime_issues:
         print(
-            f"[BROKEN] {issue.executable:<34} {issue.detail}",
+            status_row("BROKEN", issue.executable, issue.detail),
             flush=True,
         )
     if not missing and not missing_r and not runtime_issues:
@@ -1871,7 +1880,7 @@ def command_check(args: argparse.Namespace) -> int:
         ]
         if missing_magscot:
             print(
-                "[MISSING] MAGScoT files: "
+                f"{status_tag('MISSING')} MAGScoT files: "
                 + ", ".join(map(str, missing_magscot)),
                 file=sys.stderr,
                 flush=True,
@@ -2287,7 +2296,9 @@ def _run_direct(
                     "gpu_task_slots": int(
                         getattr(args, "cuda_task_slots", 0)
                     ),
-                    "safety_fraction": 0.8 if getattr(args, "resource_safety", False) else None,
+                    "cpu_capacity_fraction": 1.0 if getattr(args, "resource_safety", False) else None,
+                    "memory_safety_fraction": 0.8 if getattr(args, "resource_safety", False) else None,
+                    "gpu_safety_fraction": 0.8 if getattr(args, "resource_safety", False) else None,
                     "threads_requested": getattr(args, "requested_threads", total_threads),
                     "memory_requested_gib": getattr(args, "requested_max_memory", args.max_memory),
                     "memory_per_sample_slot_gib": args.max_memory / concurrent_sample_limit,
@@ -3326,7 +3337,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help=(
             "total CPU thread budget shared by concurrently running sample "
-            "tasks; capped at 80%% of permitted logical CPU capacity"
+            "tasks; limited to permitted logical CPU capacity (affinity/cgroup quota)"
         ),
     )
     command.add_argument(

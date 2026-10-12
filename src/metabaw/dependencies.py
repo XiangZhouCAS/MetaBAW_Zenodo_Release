@@ -12,11 +12,16 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import urllib.request
 from typing import Callable, Iterable, Mapping, Sequence
 
 from .metadecoder_coverage import metadecoder_executable
+from .terminal import status_row, status_tag
+from .cupy_runtime import (
+    CupyInstallPlan, cupy_runtime_environment, runtime_root, save_cupy_runtime,
+)
 from .metadecoder_install import (
     METADECODER_RELEASE_URL,
     pip_install_environment,
@@ -257,6 +262,7 @@ class CupyRuntimeStatus:
     devices: tuple[str, ...]
     allocation_test: bool
     error: str | None = None
+    compiled_cuda_version: str | None = None
 
     @property
     def available(self) -> bool:
@@ -354,6 +360,10 @@ MAGSCOT_R_NAMES = tuple(
 DAS_TOOL_R_NAMES = tuple(
     requirement.name for requirement in R_PACKAGE_PROFILES["DAS Tool"]
 )
+CONDA_R_PACKAGES = {
+    name: f"r-{name.lower()}"
+    for name in ("optparse", "dplyr", "readr", "digest", "data.table", "magrittr", "docopt")
+}
 PIP_INSTALL_URLS = {
     # VAMB recommends installation from PyPI for supported Python versions.
     "vamb": "vamb",
@@ -1189,7 +1199,13 @@ def cupy_runtime_status(label: str, python_command: Sequence[str]) -> CupyRuntim
         "try:\n"
         "    import cupy as cp\n"
         "    r['cupy'] = str(cp.__version__)\n"
-        "    r['cuda'] = str(cp.cuda.runtime.runtimeGetVersion())\n"
+        "    r['cuda_build'] = str(cp.cuda.runtime.runtimeGetVersion())\n"
+        "    r['cuda'] = str(cp.cuda.get_local_runtime_version())\n"
+        "    target = os.environ.get('METABAW_CUPY_CUDA_VERSION')\n"
+        "    if target:\n"
+        "        major, minor = map(int, target.split('.'))\n"
+        "        if int(r['cuda']) != major * 1000 + minor * 10:\n"
+        "            raise RuntimeError('CuPy runtime does not match configured nvidia-smi CUDA ' + target)\n"
         "    r['count'] = int(cp.cuda.runtime.getDeviceCount())\n"
         "    if not r['count']: raise RuntimeError('CuPy sees no CUDA devices')\n"
         "    pool = cp.get_default_memory_pool()\n"
@@ -1212,7 +1228,8 @@ def cupy_runtime_status(label: str, python_command: Sequence[str]) -> CupyRuntim
     )
     try:
         result = subprocess.run([*python_command, "-c", probe], capture_output=True,
-                                text=True, check=False, timeout=60)
+                                text=True, check=False, timeout=60,
+                                env={**os.environ, **cupy_runtime_environment()})
         payload = next(json.loads(line[len(marker):]) for line in reversed(result.stdout.splitlines())
                        if line.startswith(marker))
         error = payload.get("error") or (f"CuPy probe exited with code {result.returncode}"
@@ -1220,16 +1237,17 @@ def cupy_runtime_status(label: str, python_command: Sequence[str]) -> CupyRuntim
         return CupyRuntimeStatus(label, payload.get("python"), payload.get("cupy"),
                                  payload.get("cuda"), payload.get("visible"),
                                  int(payload.get("count", 0)), tuple(payload.get("devices", ())),
-                                 bool(payload.get("allocation")), error)
-    except (OSError, subprocess.SubprocessError, StopIteration, ValueError, TypeError) as exc:
+                                 bool(payload.get("allocation")), error, payload.get("cuda_build"))
+    except (OSError, RuntimeError, subprocess.SubprocessError, StopIteration, ValueError, TypeError) as exc:
         return CupyRuntimeStatus(label, None, None, None, os.environ.get("CUDA_VISIBLE_DEVICES"),
                                  0, (), False, f"Cannot validate CuPy CUDA runtime: {exc}")
 
 
 def print_cupy_runtime_status(status: CupyRuntimeStatus) -> None:
     state = "CUDA OK" if status.available else "CUDA MISSING"
-    print(f"[{state}] {status.label}: Python {status.python_version or 'unknown'}; "
+    print(f"{status_tag(state)} {status.label}: Python {status.python_version or 'unknown'}; "
           f"CuPy {status.cupy_version or 'not installed'}; CUDA runtime {status.cuda_version or 'none'}; "
+          f"CuPy build CUDA {status.compiled_cuda_version or 'unknown'}; "
           f"visible devices={status.device_count}; "
           f"{status.error or 'allocation, kernel, linear-algebra and pool-limit tests passed'}", flush=True)
 
@@ -1237,7 +1255,7 @@ def print_cupy_runtime_status(status: CupyRuntimeStatus) -> None:
 def print_host_cuda_status(status: HostCudaStatus) -> None:
     if not status.available:
         print(
-            f"[CUDA MISSING] NVIDIA driver: {status.error or 'unavailable'}",
+            f"{status_tag('CUDA MISSING')} NVIDIA driver: {status.error or 'unavailable'}",
             flush=True,
         )
         return
@@ -1254,7 +1272,7 @@ def print_host_cuda_status(status: HostCudaStatus) -> None:
         for device in status.devices
     )
     print(
-        f"[CUDA OK] NVIDIA driver {drivers}; advertised CUDA {cuda}; GPUs: {devices}",
+        f"{status_tag('CUDA OK')} NVIDIA driver {drivers}; advertised CUDA {cuda}; GPUs: {devices}",
         flush=True,
     )
 
@@ -1276,7 +1294,7 @@ def print_cuda_runtime_status(status: CudaRuntimeStatus) -> None:
         detail += f"; devices={', '.join(status.devices)}; allocation test passed"
     else:
         detail += f"; {status.error or 'CUDA allocation test failed'}"
-    print(f"[{state}] {status.label}: {detail}", flush=True)
+    print(f"{status_tag(state)} {status.label}: {detail}", flush=True)
 
 
 def isolated_environment_status(
@@ -1752,8 +1770,8 @@ def install_main_cuda_runtime(
 def main_cupy_install_command(
     advertised_cuda: str | None,
     preferred_cuda: str | None = None,
-) -> tuple[str, ...]:
-    """Plan one CuPy/CTK installation in the current Conda prefix only."""
+) -> CupyInstallPlan:
+    """Match nvidia-smi exactly, with CUDA libraries separate from PyTorch's."""
     frontend = shutil.which("conda")
     prefix = Path(sys.prefix).resolve()
     if frontend is None or not (prefix / "conda-meta").is_dir():
@@ -1773,53 +1791,68 @@ def main_cupy_install_command(
             + ". Repair them with their original package manager; do not overlay another CuPy package."
         )
 
-    def version(value: str | None) -> tuple[int, int] | None:
-        match = re.fullmatch(r"(\d+)(?:\.(\d+))?(?:\.\d+)?", value or "")
-        return (int(match[1]), int(match[2] or 0)) if match else None
-
     supported = ((11, 2), (11, 3), (11, 4), (11, 5), (11, 6), (11, 7), (11, 8),
                  (12, 0), (12, 1), (12, 2), (12, 3), (12, 4), (12, 5), (12, 6),
                  (12, 8), (12, 9), (13, 0))
-    installed_cuda = None
-    for package in ("cuda-version", "cudatoolkit"):
-        for record in sorted((prefix / "conda-meta").glob(f"{package}-*.json")):
-            try:
-                payload = json.loads(record.read_text(encoding="utf-8"))
-                if isinstance(payload, dict) and payload.get("name") == package and payload.get("version"):
-                    installed_cuda = str(payload["version"])
-                    break
-            except (OSError, ValueError):
-                continue
-        if installed_cuda is not None:
-            break
-    maximum = version(advertised_cuda)
-    preferred = version(installed_cuda or preferred_cuda)
-    if preferred in supported and (maximum is None or preferred <= maximum):
-        selected = preferred
-    else:
-        compatible = [item for item in supported if maximum is not None and item <= maximum]
-        if not compatible:
-            raise RuntimeError(f"Cannot select a supported CuPy CUDA runtime for driver CUDA {advertised_cuda!r}")
-        selected = compatible[-1]
+    match = re.fullmatch(r"(\d+)(?:\.(\d+))?(?:\.\d+)?", advertised_cuda or "")
+    selected = (int(match[1]), int(match[2] or 0)) if match else None
+    if selected not in supported:
+        raise RuntimeError(
+            f"Cannot select a supported CuPy CUDA runtime matching nvidia-smi {advertised_cuda!r}; "
+            "no older CUDA version will be substituted."
+        )
     cuda = f"{selected[0]}.{selected[1]}"
-    return (
-        frontend, "install", "--yes", "--prefix", str(prefix),
-        "--freeze-installed", "--channel", "conda-forge",
-        f"python={sys.version_info.major}.{sys.version_info.minor}",
-        "cupy>=13,<14", f"cuda-version={cuda}",
+    # This library-only prefix has no Python and no main-environment
+    # pytorch-cuda constraints. CuPy itself still uses MetaBAW's interpreter.
+    runtime_prefix = runtime_root() / cuda
+    action = "install" if (runtime_prefix / "conda-meta").is_dir() else "create"
+    libraries = ((f"cudatoolkit={cuda}",) if selected[0] == 11 else (
+        f"cuda-version={cuda}", "cuda-cudart", "cuda-cudart-dev", "cuda-nvrtc",
+        "cuda-nvrtc-dev", "libcublas", "libcusolver", "libcusparse", "libcurand",
+        "libcufft", "libnvjitlink",
+    ))
+    runtime_command = (
+        frontend, action, "--yes", "--prefix", str(runtime_prefix),
+        *(() if action == "install" else ("--no-default-packages",)),
+        "--override-channels", "--channel", "conda-forge", *libraries,
     )
+    # --no-deps keeps existing numerical packages, including NumPy, unchanged.
+    # The pinned wheel requires NumPy >=1.22,<2.6 and fastrlock >=0.5.
+    try:
+        numpy_version = metadata.version("numpy")
+    except metadata.PackageNotFoundError as exc:
+        raise RuntimeError("Install MetaDecoder's NumPy dependency in the main environment first") from exc
+    numbers = re.match(r"(\d+)\.(\d+)", numpy_version)
+    if not numbers or not (1, 22) <= (int(numbers[1]), int(numbers[2])) < (2, 6):
+        raise RuntimeError(f"CuPy 13.6 requires NumPy >=1.22,<2.6; found {numpy_version}")
+    requirements = [f"cupy-cuda{selected[0]}x==13.6.0"]
+    try:
+        lock_version = metadata.version("fastrlock")
+    except metadata.PackageNotFoundError:
+        requirements.append("fastrlock>=0.5")
+    else:
+        numbers = re.match(r"(\d+)\.(\d+)", lock_version)
+        if not numbers or (int(numbers[1]), int(numbers[2])) < (0, 5):
+            raise RuntimeError(f"CuPy requires fastrlock >=0.5; found {lock_version}")
+    pip_command = (sys.executable, "-m", "pip", "install", "--no-deps",
+                   "--only-binary=:all:", *requirements)
+    return CupyInstallPlan(cuda, runtime_prefix, (runtime_command, pip_command))
 
 
-def install_main_cupy_runtime(command: Sequence[str]) -> None:
-    """Execute an approved CuPy plan; never uninstall packages or fall back to base."""
+def install_main_cupy_runtime(plan: CupyInstallPlan) -> None:
+    """Install library-only CUDA and main-Python CuPy, then publish routing."""
     process = run_conda_transaction(
-        command, environment_overrides={"CONDA_CHANNEL_PRIORITY": "flexible"},
+        plan.commands[0], environment_overrides={"CONDA_CHANNEL_PRIORITY": "strict"},
     )
     if process.returncode != 0:
         raise RuntimeError(
-            f"CuPy installation failed (exit code {process.returncode}). "
-            "Existing packages were frozen; no destructive or different-environment fallback was attempted."
+            f"CuPy CUDA {plan.cuda_version} libraries failed to install (exit code {process.returncode}); "
+            "the MetaBAW environment was not changed."
         )
+    process = subprocess.run(plan.commands[1], check=False, env=pip_install_environment())
+    if process.returncode != 0:
+        raise RuntimeError(f"Main-environment CuPy wheel installation failed (exit code {process.returncode})")
+    save_cupy_runtime(plan)
 
 
 def print_isolated_status(status: IsolatedEnvironmentStatus) -> None:
@@ -1832,7 +1865,7 @@ def print_isolated_status(status: IsolatedEnvironmentStatus) -> None:
     python_version = status.python_version or "unknown"
     detail = status.error or status.executable or f"{status.spec.executable} not found"
     print(
-        f"[{state}] {status.spec.display_name} environment {status.environment}; "
+        f"{status_tag(state)} {status.spec.display_name} environment {status.environment}; "
         f"Python {python_version}; {detail}",
         flush=True,
     )
@@ -2269,22 +2302,73 @@ def install_r_packages(
     bioconductor = sorted(
         name for name, source in unique if source == "bioconductor"
     )
+    if not unique:
+        return
+    prefix = Path(sys.prefix).resolve()
+    conda_names = sorted(set(cran) & CONDA_R_PACKAGES.keys())
+    frontend = (
+        conda_frontend()
+        if conda_names and (prefix / "conda-meta").is_dir()
+        and Path(rscript).resolve().is_relative_to(prefix)
+        else None
+    )
+    if frontend is not None:
+        # Restore both the R headers/runtime and compiled packages together.
+        # A recorded Conda package can have been overwritten by CRAN, so an
+        # ordinary install may incorrectly report that the broken ABI is fine.
+        version = _conda_package_version(rscript, "r-base")
+        if version is None:
+            probe = subprocess.run(
+                [rscript, "--vanilla", "-e", "cat(as.character(getRversion()))"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                check=False, timeout=30,
+            )
+            version = probe.stdout.strip() if probe.returncode == 0 else ""
+        match = re.match(r"^(\d+\.\d+)(?:\.|$)", version)
+        if match is None:
+            raise RuntimeError("Cannot identify the current R version for compatible Conda R packages")
+        packages = [f"r-base={match.group(1)}.*"]
+        if {"dplyr", "readr"}.intersection(conda_names):
+            packages.append("r-rlang")
+        packages.extend(CONDA_R_PACKAGES[name] for name in conda_names)
+        command = [
+            frontend, "install", "--yes", "--prefix", str(prefix),
+            "--override-channels", "--channel", "conda-forge",
+            "--force-reinstall", *packages,
+        ]
+        print(
+            f"Installing compatible R {match.group(1)} packages with Conda: "
+            + ", ".join(packages), flush=True,
+        )
+        process = run_conda_transaction(command)
+        if process.returncode != 0:
+            raise RuntimeError(
+                "Conda R package repair failed with exit code "
+                f"{process.returncode}; rerun `metabaw check` after resolving the "
+                "Conda error. The compiled R packages must match the R runtime."
+            )
+        cran = [name for name in cran if name not in conda_names]
+    elif {"dplyr", "readr"}.intersection(cran):
+        # On unmanaged R installations, rebuild rlang instead of reusing an
+        # installed library that may target a different R binary interface.
+        cran = sorted(set(cran) | {"rlang"})
     commands: list[tuple[str, list[str]]] = []
     if cran:
         expression = (
             "options(repos=c(CRAN='https://cloud.r-project.org')); "
-            f"install.packages({_r_character_vector(cran)}, dependencies=TRUE)"
+            f"install.packages({_r_character_vector(cran)}, "
+            "dependencies=NA, type='source')"
         )
         commands.append(("CRAN", [rscript, "-e", expression]))
     if bioconductor:
         expression = (
             "options(repos=c(CRAN='https://cloud.r-project.org')); "
             "if (!requireNamespace('BiocManager', quietly=TRUE)) "
-            "install.packages('BiocManager', dependencies=TRUE); "
+            "install.packages('BiocManager', dependencies=NA); "
             "if (!requireNamespace('BiocManager', quietly=TRUE)) "
             "quit(status=1); "
             f"BiocManager::install({_r_character_vector(bioconductor)}, "
-            "ask=FALSE, update=FALSE)"
+            "ask=FALSE, update=FALSE, dependencies=NA)"
         )
         commands.append(("Bioconductor", [rscript, "-e", expression]))
     for source, command in commands:
@@ -2298,6 +2382,20 @@ def install_r_packages(
                 f"{source} R package installation failed with exit code "
                 f"{process.returncode}"
             )
+    # install.packages() can exit successfully while reporting package failures
+    # as warnings. Validate the namespaces, including their native libraries.
+    validation = subprocess.run(
+        [rscript, "-e", (
+            f"for (package in {_r_character_vector(sorted({name for name, _source in unique}))}) "
+            "tryCatch(loadNamespace(package), error=function(e) { "
+            "message(package, ': ', conditionMessage(e)); quit(status=1) })"
+        )],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        check=False, timeout=60,
+    )
+    if validation.returncode != 0:
+        detail = (validation.stderr or validation.stdout or "namespace load failed").strip()
+        raise RuntimeError(f"Required R packages are not usable after installation: {detail}")
 
 
 def missing_magscot_r_packages() -> list[str]:
@@ -2324,20 +2422,34 @@ def install_magscot(directory: Path) -> None:
         raise RuntimeError(
             f"MAGScoT directory exists but is incomplete: {directory}; missing={missing}"
         )
+    if directory.is_symlink():
+        raise RuntimeError(f"Incomplete MAGScoT directory is a symlink: {directory}")
     directory.parent.mkdir(parents=True, exist_ok=True)
-    process = subprocess.run(
-        [
-            "git",
-            "clone",
-            "--depth",
-            "1",
-            "https://github.com/ikmb/MAGScoT.git",
-            str(directory),
-        ],
-        check=False,
+    for attempt in range(1, 4):
+        # Only this private attempt directory can be removed after failure.
+        with tempfile.TemporaryDirectory(prefix=".magscot-", dir=directory.parent) as temporary:
+            source = Path(temporary) / "source"
+            command = ["git", *(["-c", "http.version=HTTP/1.1"] if attempt > 1 else []),
+                       "clone", "--depth", "1", "https://github.com/ikmb/MAGScoT.git", str(source)]
+            print(f"[DOWNLOAD] MAGScoT attempt {attempt}/3"
+                  + (" using HTTP/1.1" if attempt > 1 else ""), flush=True)
+            try:
+                process = subprocess.run(command, check=False, timeout=180)
+            except subprocess.TimeoutExpired:
+                process = None
+            if process is not None and process.returncode == 0:
+                if any(not path.is_file() for path in magscot_files(source)):
+                    raise RuntimeError("Official MAGScoT checkout is missing its script or marker HMMs")
+                if directory.exists():
+                    directory.rmdir()  # Only an empty destination can be replaced.
+                source.replace(directory)
+                return
+    raise RuntimeError(
+        f"MAGScoT installation failed after 3 attempts: {directory}. "
+        "Check this server's HTTPS/proxy connection to GitHub, or transfer the official "
+        "ikmb/MAGScoT repository from a machine with GitHub access and rerun "
+        "metabaw check --scope bin --magscot-dir /path/to/MAGScoT."
     )
-    if process.returncode != 0 or any(not path.is_file() for path in magscot_files(directory)):
-        raise RuntimeError(f"MAGScoT installation failed: {directory}")
 
 
 def _run_database_command(command: list[str]) -> None:
@@ -2892,6 +3004,7 @@ def configured_database_path(
 
 
 def print_software_status(requirements: Sequence[SoftwareRequirement]) -> None:
+    name_width = max(34, max((len(item.executable) for item in requirements), default=0))
     for requirement in requirements:
         location = (metadecoder_executable() if requirement.executable == "metadecoder"
                     else shutil.which(requirement.executable))
@@ -2907,7 +3020,7 @@ def print_software_status(requirements: Sequence[SoftwareRequirement]) -> None:
         else:
             detail = f"Conda package: {requirement.package}"
         print(
-            f"[{state}] {requirement.executable:<34} {requirement.purpose}; {detail}",
+            status_row(state, requirement.executable, f"{requirement.purpose}; {detail}", name_width),
             flush=True,
         )
 

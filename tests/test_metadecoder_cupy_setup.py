@@ -19,6 +19,7 @@ from metabaw.dependencies import (
     cupy_runtime_status,
 )
 from metabaw.metadecoder_coverage import metadecoder_executable
+from metabaw.cupy_runtime import CupyInstallPlan
 from metabaw.direct import DirectBinBuilder
 from metabaw.discovery import Analysis, ReadSample
 from test_metadecoder_cuda_probe import cupy_status, host_status
@@ -68,23 +69,27 @@ def test_base_or_foreign_python_does_not_satisfy_main_requirement(tmp_path, kind
 
 
 @pytest.mark.parametrize("maximum,preferred,expected", [
-    ("12.8", "11.8", "11.8"), ("12.8", None, "12.8"),
-    ("12.8", "13.0", "12.8"), ("13.2", "12.8", "12.8"),
-    ("12.7", None, "12.6"), (None, "11.8", "11.8"),
+    ("12.8", "11.8", "12.8"), ("12.8", None, "12.8"),
+    ("12.8", "13.0", "12.8"), ("12.9", "11.8", "12.9"),
+    ("13.0", "12.8", "13.0"), ("11.8", "12.8", "11.8"),
 ])
-def test_cupy_plan_targets_main_prefix_and_preserves_working_cuda(tmp_path, maximum, preferred, expected):
+def test_cupy_plan_matches_driver_and_keeps_main_python(tmp_path, maximum, preferred, expected):
     (tmp_path / "conda-meta").mkdir()
     with patch("sys.prefix", str(tmp_path)), patch("shutil.which", return_value="/base/bin/conda"), \
             patch("metabaw.dependencies.metadata.distributions", return_value=[]):
-        command = main_cupy_install_command(maximum, preferred)
-    assert command[command.index("--prefix") + 1] == str(tmp_path.resolve())
-    assert "--freeze-installed" in command
-    assert f"python={sys.version_info.major}.{sys.version_info.minor}" in command
-    assert "cupy>=13,<14" in command
-    assert f"cuda-version={expected}" in command
+        plan = main_cupy_install_command(maximum, preferred)
+    command, pip = plan.commands
+    assert plan.runtime_prefix == tmp_path.resolve() / "share" / "metabaw" / "cuda" / expected
+    assert command[command.index("--prefix") + 1] == str(plan.runtime_prefix)
+    assert "--no-default-packages" in command and "--override-channels" in command
+    assert not any(item.startswith("python=") or "pytorch" in item for item in command)
+    assert (f"cudatoolkit={expected}" if expected.startswith("11.") else f"cuda-version={expected}") in command
+    assert pip[:3] == (sys.executable, "-m", "pip")
+    assert "--no-deps" in pip and f"cupy-cuda{expected.split('.')[0]}x==13.6.0" in pip
+    assert plan.cuda_version == expected
 
 
-@pytest.mark.parametrize("maximum", [None, "unknown", "11.1"])
+@pytest.mark.parametrize("maximum", [None, "unknown", "11.1", "12.7", "13.2"])
 def test_cupy_plan_rejects_unknown_or_unsupported_driver(tmp_path, maximum):
     (tmp_path / "conda-meta").mkdir()
     with patch("sys.prefix", str(tmp_path)), patch("shutil.which", return_value="conda"), \
@@ -93,15 +98,20 @@ def test_cupy_plan_rejects_unknown_or_unsupported_driver(tmp_path, maximum):
         main_cupy_install_command(maximum)
 
 
-def test_cupy_plan_preserves_cuda_metadata_from_main_not_base(tmp_path):
+def test_existing_pytorch_cuda_does_not_downgrade_or_conflict_with_cupy_target(tmp_path):
     records = tmp_path / "conda-meta"
     records.mkdir()
     (records / "cuda-version-12.6-0.json").write_text(json.dumps({"name": "cuda-version", "version": "12.6"}))
+    torch = records / "pytorch-cuda-11.8-0.json"
+    torch.write_text(json.dumps({"name": "pytorch-cuda", "version": "11.8"}))
+    original = torch.read_bytes()
     with patch("sys.prefix", str(tmp_path)), patch("sys.executable", "/base/bin/python"), \
             patch("shutil.which", return_value="conda"), \
             patch("metabaw.dependencies.metadata.distributions", return_value=[]):
-        command = main_cupy_install_command("12.8", "11.8")
-    assert "cuda-version=12.6" in command
+        plan = main_cupy_install_command("12.9", "11.8")
+    assert "cuda-version=12.9" in plan.commands[0]
+    assert str(tmp_path.resolve()) not in plan.commands[0]
+    assert torch.read_bytes() == original
 
 
 @pytest.mark.parametrize("name", ["cupy", "cupy-core", "cupy_cuda12x"])
@@ -123,21 +133,26 @@ def test_cupy_plan_rejects_missing_conda_or_non_conda_prefix(tmp_path, conda, ha
 
 
 @pytest.mark.parametrize("code", [0, 1])
-def test_cupy_install_uses_one_approved_transaction_without_fallback(code):
-    command = ("conda", "install", "--prefix", "/envs/metabaw", "cupy>=13,<14")
-    with patch("metabaw.dependencies.run_conda_transaction", return_value=subprocess.CompletedProcess(command, code)) as run:
+def test_cupy_install_failure_never_changes_main_or_publishes_routing(tmp_path, code):
+    command = ("conda", "create", "--prefix", str(tmp_path / "cuda"), "cuda-version=12.9")
+    pip = ("main-python", "-m", "pip", "install", "--no-deps", "cupy-cuda12x==13.6.0")
+    plan = CupyInstallPlan("12.9", tmp_path / "cuda", (command, pip))
+    with patch("metabaw.dependencies.run_conda_transaction", return_value=subprocess.CompletedProcess(command, code)) as run, \
+            patch("metabaw.dependencies.subprocess.run", return_value=subprocess.CompletedProcess(pip, 0)) as install, \
+            patch("metabaw.dependencies.save_cupy_runtime") as save:
         if code:
-            with pytest.raises(RuntimeError, match="no destructive or different-environment fallback"):
-                install_main_cupy_runtime(command)
+            with pytest.raises(RuntimeError, match="MetaBAW environment was not changed"):
+                install_main_cupy_runtime(plan)
         else:
-            install_main_cupy_runtime(command)
-    run.assert_called_once_with(command, environment_overrides={"CONDA_CHANNEL_PRIORITY": "flexible"})
+            install_main_cupy_runtime(plan)
+    run.assert_called_once_with(command, environment_overrides={"CONDA_CHANNEL_PRIORITY": "strict"})
+    assert install.call_count == save.call_count == int(code == 0)
 
 
 @pytest.mark.parametrize("approved,available", [(False, False), (True, False), (True, True)])
 def test_cupy_repair_requires_approval_and_retests_native_main_runtime(approved, available):
     missing, repaired = cupy_status(False), cupy_status(available)
-    plan = ("conda", "install", "--prefix", "/envs/metabaw", "cupy>=13,<14")
+    plan = CupyInstallPlan("12.0", Path("/envs/metabaw/cuda/12.0"), (("conda",), ("python",)))
     with patch("metabaw.cli.main_cupy_install_command", return_value=plan) as planner, \
             patch("metabaw.cli.confirm_install", return_value=approved), \
             patch("metabaw.cli.install_main_cupy_runtime") as install, \
@@ -152,7 +167,8 @@ def test_cupy_repair_requires_approval_and_retests_native_main_runtime(approved,
 def test_cupy_repair_failure_is_reported_without_claiming_success():
     missing = cupy_status(False)
     errors = io.StringIO()
-    with patch("metabaw.cli.main_cupy_install_command", return_value=("conda",)), \
+    plan = CupyInstallPlan("12.0", Path("/envs/metabaw/cuda/12.0"), (("conda",), ("python",)))
+    with patch("metabaw.cli.main_cupy_install_command", return_value=plan), \
             patch("metabaw.cli.confirm_install", return_value=True), \
             patch("metabaw.cli.install_main_cupy_runtime", side_effect=RuntimeError("solver failed")), \
             patch("metabaw.cli._metadecoder_cuda_status") as probe, \
@@ -170,7 +186,7 @@ def test_cupy_repair_does_not_install_for_hidden_devices_or_broken_existing_cupy
     plan.assert_not_called()
 
 
-@pytest.mark.parametrize("failure", [None, "kernel", "linear algebra"])
+@pytest.mark.parametrize("failure", [None, "kernel", "linear algebra", "runtime"])
 def test_generated_cupy_probe_requires_kernels_and_linear_algebra(failure):
     events = []
 
@@ -197,7 +213,8 @@ def test_generated_cupy_probe_requires_kernels_and_linear_algebra(failure):
     fake = SimpleNamespace(
         __version__="13.6", get_default_memory_pool=lambda: pool, ones=lambda size: Vector(1),
         eye=lambda size: None, linalg=SimpleNamespace(cholesky=cholesky),
-        cuda=SimpleNamespace(Device=lambda index: nullcontext(), runtime=SimpleNamespace(
+        cuda=SimpleNamespace(get_local_runtime_version=lambda: 12080 if failure == "runtime" else 12090,
+                             Device=lambda index: nullcontext(), runtime=SimpleNamespace(
             runtimeGetVersion=lambda: 12080, getDeviceCount=lambda: 1,
             deviceSynchronize=lambda: None, getDeviceProperties=lambda index: {"name": "synthetic GPU"},
         )),
@@ -209,9 +226,16 @@ def test_generated_cupy_probe_requires_kernels_and_linear_algebra(failure):
             exec(command[-1], {})
         return subprocess.CompletedProcess(command, 0, output.getvalue(), "")
 
-    with patch("metabaw.dependencies.subprocess.run", side_effect=probe):
+    with patch("metabaw.dependencies.subprocess.run", side_effect=probe), \
+            patch.dict("os.environ", {"METABAW_CUPY_CUDA_VERSION": "12.9"}):
         status = cupy_runtime_status("MetaDecoder", ("synthetic-python",))
     assert status.available == (failure is None)
+    assert status.compiled_cuda_version == "12080"
+    if failure == "runtime":
+        assert "configured nvidia-smi CUDA 12.9" in status.error
+        assert not events
+        return
+    assert status.cuda_version == "12090"
     assert 16 * 1024**2 in events
     assert "kernel" in events
     if failure != "kernel":

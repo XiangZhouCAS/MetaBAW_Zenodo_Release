@@ -158,6 +158,13 @@ def _normalize_segment(tokens: list[str], depth: int, launcher_independent: bool
         token = tokens[index]
         option, separator, value = token.partition("=")
         consumed = 1
+        if program == "megahit" and option == "--memory":
+            memory_value = value if separator else (tokens[index + 1] if index + 1 < len(tokens) else "")
+            if memory_value == "${METABAW_MEGAHIT_MEMORY_BYTES:-0.9}":
+                # This exact managed expression depends on the runtime RAM
+                # allocation. Preserve user-supplied memory/analysis options.
+                index += 1 if separator else 2
+                continue
         if not separator and option in options and index + 1 < len(tokens):
             value = tokens[index + 1]
             consumed = 2

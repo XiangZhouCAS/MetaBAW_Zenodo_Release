@@ -17,6 +17,7 @@ from verify_wheel import verify_wheel
 ROOT_FILES = frozenset({
     ".gitignore", "AGENTS.md", "LICENSE", "pyproject.toml", "README.md",
     "RELEASE_NOTES.md", "SHA256SUMS", "release.py", "verify_wheel.py",
+    "metabaw_title_logo.png",
 })
 EXAMPLE_FILES = frozenset({
     "reads.tsv.example", "contigs.tsv.example", "genomes.txt.example",
@@ -95,6 +96,9 @@ def build_wheel(root: Path, temporary: Path) -> Path:
     snapshot.mkdir()
     for name in ("LICENSE", "README.md", "pyproject.toml"):
         shutil.copy2(root / name, snapshot / name)
+    logo = root / "metabaw_title_logo.png"
+    if logo.is_file():
+        shutil.copy2(logo, snapshot / logo.name)
     package = snapshot / "src" / "metabaw"
     package.mkdir(parents=True)
     for path in sorted((root / "src" / "metabaw").glob("*.py")):
