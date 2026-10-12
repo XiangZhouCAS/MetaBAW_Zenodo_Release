@@ -534,6 +534,9 @@ metabaw check --scope annotation \
   --hydrogenase-db /db/hydrogenase
 ```
 
+All four values above are **database root directories**. They must contain the
+unpacked files described in [Databases and reference assets](#databases-and-reference-assets).
+
 Run annotation with the same read manifest used by binning and a MAG list:
 
 ```bash
@@ -915,18 +918,100 @@ MetaDecoder is tested with CuPy independently of PyTorch in the main environment
 The following paths must exist and contain usable assets, not merely empty
 directories. Use reference releases compatible with the installed native tools.
 
-| Database / source | Required by | Configuration flag on `check` | Minimum expected layout |
-|---|---|---|---|
-| Legacy CheckM reference data | Standalone CheckM and MetaWRAP | `--checkm-db` | `.dmanifest`, `hmms/phylo.hmm`, `hmms/checkm.hmm`, `pfam/Pfam-A.hmm.dat`, `genome_tree/`, `distributions/`, `selected_marker_sets.tsv`, `taxon_marker_sets.tsv` |
-| CheckM2 reference database | CheckM2 | `--checkm2-db` | A nonempty `.dmnd` file, or a directory containing it |
-| GUNC reference database | GUNC | `--gunc-db` | A nonempty `.dmnd` file, or a directory containing it |
-| GTDB-Tk reference package | Taxonomy and RNA domain identification | `--gtdbtk-db` | `metadata/metadata.txt`, `taxonomy/gtdb_taxonomy.tsv`, `markers/`, `masks/`, `msa/`, `pplacer/`, `radii/` and ANI assets; new classification additionally requires `skani/` and `mrca_red/` |
-| KEGG KOfam profiles and KO list | KofamScan | `--kegg-db` | `ko_list`, nonempty `profiles/`, and usable `K.descript.txt` (locally derivable from `ko_list`) |
-| dbCAN / CAZy reference bundle | run_dbCAN | `--dbcan-db` | `CAZy.dmnd`, `dbCAN.hmm` or `dbCAN.txt`, `dbCAN-sub.hmm` or `dbCAN_sub.hmm`, and `fam-substrate-mapping.tsv` |
-| MetaBAW hydrogen-metabolism bundle, including HydDB references | Hydrogenase and terminal-enzyme searches | `--hydrogenase-db` | `hyddb.all.fa` (protein FASTA), `FeFe.dmnd`, `Terminal.dmnd`, `hyd_id-name.script.txt` |
-| Native MAGScoT scripts and marker HMMs | MAGScoT | `--magscot-dir` | `MAGScoT.R`, `hmm/gtdbtk_rel207_Pfam-A.hmm`, `hmm/gtdbtk_rel207_tigrfam.hmm` |
+**What to pass to each option**
 
-Obtain reference data from the corresponding tool/database distribution.
+These options are configured with `metabaw check`. A directory means the
+unpacked database root containing the required files, rather than the downloaded
+archive or one file inside that root. Replace `/db/...` and `/opt/...` with your
+actual locations; the examples below are absolute Linux paths.
+
+| Configuration flag | Input type | Example value |
+|---|---|---|
+| `--checkm-db` | Directory: legacy CheckM data root | `/db/checkm` |
+| `--checkm2-db` | File: CheckM2 DIAMOND database; a directory containing it is also accepted | `/db/checkm2/CheckM2_database/uniref100.KO.1.dmnd` |
+| `--gunc-db` | File: GUNC DIAMOND database; a directory containing it is also accepted | `/db/gunc/gunc_db_progenomes2.1.dmnd` |
+| `--gtdbtk-db` | Directory: unpacked GTDB-Tk reference root | `/db/gtdb/release232` |
+| `--kegg-db` | Directory: KOfam root containing both `ko_list` and `profiles/` | `/db/kofam` |
+| `--dbcan-db` | Directory: run_dbCAN database root | `/db/dbcan` |
+| `--hydrogenase-db` | Directory: complete MetaBAW hydrogen-metabolism bundle | `/db/hydrogenase` |
+| `--magscot-dir` | Directory: MAGScoT checkout containing its script and `hmm/` | `/opt/MAGScoT` |
+
+CheckM2 and GUNC ultimately use an individual, nonempty `.dmnd` file. When given
+a directory, MetaBAW searches it recursively and selects the first nonempty
+`.dmnd` file in sorted path order. Prefer the explicit file path, especially if
+several database releases are present. Unpack `.dmnd.gz` before configuration.
+For GTDB-Tk, select the directory that directly contains `metadata/`, `taxonomy/`
+and the other reference subdirectories, even if an archive creates an extra
+parent directory.
+
+`--database-dir`, for example `/db/metabaw`, is a **download destination
+directory** used with `--install-databases`. Supported downloads go into its
+`checkm2/`, `gunc/`, `gtdbtk/`, `kofam/` and `dbcan/` subdirectories; it is not the
+argument value for every database option.
+
+**Recommended downloads and required assets**
+
+Download from the official source or the MetaBAW bundle linked below. Archive
+names and `.dmnd` filenames can vary by release; use the actual unpacked name.
+
+| Database / source | Required by | Minimum expected layout or file | Recommended download |
+|---|---|---|---|
+| Legacy CheckM reference data | Standalone CheckM and MetaWRAP | `.dmanifest`, `hmms/phylo.hmm`, `hmms/checkm.hmm`, `pfam/Pfam-A.hmm.dat`, `genome_tree/`, `distributions/`, `selected_marker_sets.tsv`, `taxon_marker_sets.tsv` | [Official CheckM data mirror](https://data.ace.uq.edu.au/public/CheckM_databases/) or [CheckM reference archive on Zenodo](https://zenodo.org/records/7401545); e.g. `checkm_data_2015_01_16.tar.gz`, extracted into the selected root |
+| CheckM2 reference database | CheckM2 | A nonempty `.dmnd` file, e.g. `uniref100.KO.1.dmnd` | [Official CheckM2 database instructions](https://github.com/chklovski/CheckM2#database) and [reference database v1.1.0 on Zenodo](https://zenodo.org/records/14897628); use the release matching your CheckM2 version |
+| GUNC reference database | GUNC | A nonempty `.dmnd` file, e.g. `gunc_db_progenomes2.1.dmnd` | [Official GUNC download instructions](https://grp-bork.embl-community.io/gunc/installation.html#download-gunc-db) or [proGenomes 2.1 reference archive on Zenodo](https://zenodo.org/records/19631736); unpack `gunc_db_progenomes2.1.dmnd.gz` if downloaded manually |
+| GTDB-Tk reference package | Taxonomy and RNA domain identification | `metadata/metadata.txt`, `taxonomy/gtdb_taxonomy.tsv`, `markers/`, `masks/`, `msa/`, `pplacer/`, `radii/` and ANI assets; new classification additionally requires `skani/` and `mrca_red/` | [Official GTDB-Tk reference instructions and compatibility table](https://ecogenomics.github.io/GTDBTk/installing/index.html#gtdb-tk-reference-data) and [R232 full-package download directory](https://data.gtdb.ecogenomic.org/releases/release232/232.0/auxillary_files/gtdbtk_package/full_package/); MetaBAW's GTDB-Tk 2.7.2 profile uses R232 |
+| KEGG KOfam profiles and KO list | KofamScan | `ko_list`, nonempty `profiles/`, and usable `K.descript.txt` (locally derivable from `ko_list`) | [Official KOfam downloads](https://www.genome.jp/ftp/db/kofam/): [profiles.tar.gz](https://www.genome.jp/ftp/db/kofam/profiles.tar.gz) and [ko_list.gz](https://www.genome.jp/ftp/db/kofam/ko_list.gz) |
+| dbCAN / CAZy reference bundle | run_dbCAN | `CAZy.dmnd`, `dbCAN.hmm` or `dbCAN.txt`, `dbCAN-sub.hmm` or `dbCAN_sub.hmm`, and `fam-substrate-mapping.tsv` | [Official run_dbCAN database download guide](https://run-dbcan.readthedocs.io/en/latest/user_guide/prepare_the_database.html), including HTTP and AWS S3 download addresses for each file |
+| MetaBAW hydrogen-metabolism bundle, including HydDB references | Hydrogenase and terminal-enzyme searches | `hyddb.all.fa` (protein FASTA), `FeFe.dmnd`, `Terminal.dmnd`, `hyd_id-name.script.txt` | [XiangZhouCAS/Hydrogenase_db](https://github.com/XiangZhouCAS/Hydrogenase_db); original hydrogenase reference source: [GreeningLab/HydDB](https://github.com/GreeningLab/HydDB) |
+| Native MAGScoT scripts and marker HMMs | MAGScoT | `MAGScoT.R`, `hmm/gtdbtk_rel207_Pfam-A.hmm`, `hmm/gtdbtk_rel207_tigrfam.hmm` | [Official MAGScoT repository](https://github.com/ikmb/MAGScoT); obtain the script and bundled marker HMMs together |
+
+For KOfam, extract `profiles.tar.gz` into the database root and decompress
+`ko_list.gz` to `ko_list`. Point `--kegg-db` at the parent of `profiles/`, for
+example `/db/kofam`. MetaBAW can generate a missing `K.descript.txt` from the
+`knum` and `definition` columns of `ko_list` during `check`; that database root
+must be writable when this file needs to be generated.
+
+For dbCAN, the official downloader prepares the required files together:
+
+```bash
+run_dbcan database --db_dir /db/dbcan --aws_s3 --no-cgc
+metabaw check --scope annotation --dbcan-db /db/dbcan
+```
+
+`--dbcan-db /db/dbcan` selects the whole bundle, including both HMM collections
+and the substrate mapping table; `CAZy.dmnd` is one file inside that directory.
+
+**Hydrogenase download and attribution**
+
+Download the MetaBAW-ready hydrogenase and terminal-enzyme bundle from
+[XiangZhouCAS/Hydrogenase_db](https://github.com/XiangZhouCAS/Hydrogenase_db).
+The underlying hydrogenase reference sequences originate from
+[GreeningLab/HydDB](https://github.com/GreeningLab/HydDB); credit that original
+source when using these references. The MetaBAW bundle also supplies the FeFe
+and terminal-enzyme DIAMOND databases and the hydrogenase ID-to-class mapping.
+
+The repository distributes `Terminal.dmnd.gz`. Decompress it before using
+MetaBAW, keeping the filename `Terminal.dmnd`:
+
+```bash
+git clone https://github.com/XiangZhouCAS/Hydrogenase_db.git /db/hydrogenase
+gunzip /db/hydrogenase/Terminal.dmnd.gz
+metabaw check --scope annotation --hydrogenase-db /db/hydrogenase
+```
+
+The directory passed to `--hydrogenase-db` must directly contain:
+
+```text
+/db/hydrogenase/
+|-- hyddb.all.fa
+|-- FeFe.dmnd
+|-- Terminal.dmnd
+|-- hyd_id-name.script.txt
+```
+
+Keep these four files together. The workflow builds its BLAST index from
+`hyddb.all.fa` in the temporary workspace.
+
 `--install-databases` enables supported downloads for selected missing CheckM2,
 GUNC, GTDB-Tk, KOfam and dbCAN databases; it is not a universal database installer.
 Legacy CheckM data and the complete MetaBAW hydrogen-metabolism bundle must be
@@ -937,11 +1022,13 @@ Configure existing binning databases, then enable optional components as needed:
 
 ```bash
 metabaw check --scope bin \
-  --checkm2-db /db/checkm2/database.dmnd \
+  --checkm2-db /db/checkm2/CheckM2_database/uniref100.KO.1.dmnd \
   --magscot-dir /opt/MAGScoT
 
 metabaw check --all --checkm-db /db/checkm
-metabaw check --all --gunc-db /db/gunc/database.dmnd --gtdbtk-db /db/gtdbtk
+metabaw check --all \
+  --gunc-db /db/gunc/gunc_db_progenomes2.1.dmnd \
+  --gtdbtk-db /db/gtdb/release232
 ```
 
 Use `check --all` only when preparing the full toolset: it checks components
@@ -949,10 +1036,13 @@ not necessarily used by your intended run and may prompt for their installation.
 To download only supported missing databases in a selected profile:
 
 ```bash
-metabaw check --scope annotation --install-databases --database-dir /db/metabaw
+metabaw check --scope annotation --install-databases \
+  --database-dir /db/metabaw \
+  --hydrogenase-db /db/hydrogenase
 ```
 
-The command still requires an existing hydrogen-metabolism bundle. Downloaded
+The hydrogen-metabolism bundle must already exist at `/db/hydrogenase` in this
+example. Downloaded
 releases are not guaranteed to match an earlier analysis; record and retain the
 actual reference version instead of silently replacing a database in place.
 
@@ -973,6 +1063,10 @@ does not use those runtime-config overrides.
 | KOfam | `KOFAM_DB` |
 | dbCAN | `DBCAN_DB` |
 | Hydrogen metabolism | `HYDROGENASE_DB` |
+
+Environment variables use the same input types as the corresponding flags:
+`CHECKM2DB` and `GUNC_DB` preferably point to the actual `.dmnd` files; the
+other database variables point to their unpacked database root directories.
 
 Explicit database arguments take precedence. Otherwise, a valid environment
 variable is preferred to a saved path; an invalid environment path can fall
