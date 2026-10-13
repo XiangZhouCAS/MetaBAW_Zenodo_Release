@@ -1173,11 +1173,6 @@ validation permits it. Already deleted or overwritten intermediates cannot be
 recovered. For a separate analysis, use a new output and temporary directory.
 Do not delete SQLite state to bypass validation.
 
-Existing state is upgraded without discarding task records. Older checkpoints
-may need the original logs, stopped original state or preserved intermediate
-timestamps to validate migration; if that evidence is lost, a one-time rerun
-may be necessary. Portable checkpoints no longer rely on copied generated-file
-timestamps. See [release notes](RELEASE_NOTES.md) for migration details.
 Invalidated successful tasks print `[RESUME INVALIDATED]`; full decisions are
 in `<tmp>/runtime/resume_diagnostics.json`. Reused logs retain the original
 commands and thread counts, not the new requested allocation.
