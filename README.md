@@ -1003,9 +1003,7 @@ MetaDecoder is tested with CuPy independently of PyTorch in the main environment
 profile and any explicitly supplied database paths. Use <code>--all</code> to include
 optional legacy CheckM and GUNC databases. An incomplete database is reported
 as <code>[MISSING]</code> with the failed file/load check, returns a nonzero exit status,
-and is not saved as a validated path. Downloads requested with
-<code>--install-databases</code> are rechecked before reporting <code>[OK]</code> or saving their
-configuration.
+and is not saved as a validated path.
 </p>
 
 <p align="justify">
@@ -1044,13 +1042,6 @@ several database releases are present. Unpack <code>.dmnd.gz</code> before confi
 For GTDB-Tk, select the directory that directly contains <code>metadata/</code>, <code>taxonomy/</code>
 and the other reference subdirectories, even if an archive creates an extra
 parent directory.
-</p>
-
-<p align="justify">
-<code>--database-dir</code>, for example <code>/db/metabaw</code>, is a <strong>download destination
-directory</strong> used with <code>--install-databases</code>. Supported downloads go into its
-<code>checkm2/</code>, <code>gunc/</code>, <code>gtdbtk/</code>, <code>kofam/</code> and <code>dbcan/</code> subdirectories; it is not the
-argument value for every database option.
 </p>
 
 **Recommended downloads and required assets**
@@ -1135,19 +1126,10 @@ metabaw check --all \
 <p align="justify">
 Use <code>check --all</code> only when preparing the full toolset: it checks components
 not necessarily used by your intended run and may prompt for their installation.
-To download only supported missing databases in a selected profile:
 </p>
 
-```bash
-metabaw check --scope annotation --install-databases \
-  --database-dir /db/metabaw \
-  --hydrogenase-db /db/hydrogenase
-```
-
 <p align="justify">
-The hydrogen-metabolism bundle must already exist at <code>/db/hydrogenase</code> in this
-example. Downloaded
-releases are not guaranteed to match an earlier analysis; record and retain the
+Database releases are not guaranteed to match an earlier analysis; record and retain the
 actual reference version instead of silently replacing a database in place.
 </p>
 
