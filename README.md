@@ -32,7 +32,6 @@ file names. This makes mixed projects and reproducible reruns easier to audit.
 - [Reports, logs, and reproducibility](#reports-logs-and-reproducibility)
 - [Temporary files and resume behavior](#temporary-files-and-resume-behavior)
 - [Examples](#examples)
-- [Development verification](#development-verification)
 - [License](#license)
 
 ## Quick start
@@ -126,22 +125,6 @@ python -m pip install --force-reinstall --no-deps \
 `--no-deps` is appropriate only when the existing environment already satisfies
 the package requirements. Installing a wheel does not install external
 bioinformatics programs or their databases.
-
-### Install from source
-
-From a clean `metaBAW_named_inputs` source checkout, activate the Python 3.11
-environment above and use the guarded release helper:
-
-```bash
-python -m pip install "setuptools>=77,<82" build pytest
-python -B release.py
-python -m pip install ./metabaw-0.1.0-py3-none-any.whl
-```
-
-This requires `src/`, `tests/`, project metadata and the release/check scripts.
-The helper tests and builds in external temporary directories, then publishes
-the wheel and checksum. Do not build directly in the maintained source tree.
-See [development verification](#development-verification) for checks and tests.
 
 ### Check dependencies
 
@@ -1220,37 +1203,6 @@ examples/run.sh
 examples/run.coassembly.sh
 examples/run.annotation.sh
 ```
-
-## Development verification
-
-The maintained source distribution retains source code, regression tests,
-examples, documentation, release helpers, one current wheel, and its checksum.
-The installed wheel contains only runtime Python modules and required package
-metadata/license files; tests, examples, build products, caches, logs, analysis
-results and old wheel backups are not installed.
-
-Use the guarded release helper for all updates. It runs tests from an external
-temporary working directory, builds a minimal source snapshot outside this
-directory, validates an explicit wheel-content allowlist, and publishes only
-the verified wheel and `SHA256SUMS`. Bytecode and pytest caches are disabled.
-Unexpected files make the check fail; the helper does not delete user data.
-Development requires `build` and `pytest` in addition to the build backend.
-
-```bash
-python -B release.py --test   # tests only, without leaving artifacts here
-python -B release.py          # test, build, verify and publish one wheel
-python -B release.py --check  # directory, wheel-content and checksum audit
-python -B verify_wheel.py     # detailed read-only wheel integrity check
-```
-
-Do not build directly in this directory or store workflow outputs or backup
-wheels here. Run biological analyses from a separate working directory.
-
-`--check` and `verify_wheel.py` require a built wheel; after cloning a source-only
-repository, run `python -B release.py` first. README changes are included in
-wheel metadata, so rebuild the wheel and checksum when updating documentation.
-Automated tests use fixtures and synthetic workers unless stated otherwise;
-passing them is not a replacement for native Linux/GPU biological validation.
 
 ## License
 
