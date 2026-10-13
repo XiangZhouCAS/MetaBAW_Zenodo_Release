@@ -918,6 +918,30 @@ MetaDecoder is tested with CuPy independently of PyTorch in the main environment
 The following paths must exist and contain usable assets, not merely empty
 directories. Use reference releases compatible with the installed native tools.
 
+`metabaw check` validates database completeness and loading for its selected
+profile and any explicitly supplied database paths. Use `--all` to include
+optional legacy CheckM and GUNC databases. An incomplete database is reported
+as `[MISSING]` with the failed file/load check, returns a nonzero exit status,
+and is not saved as a validated path. Downloads requested with
+`--install-databases` are rechecked before reporting `[OK]` or saving their
+configuration.
+
+Every `bin` and `annotation` invocation rechecks the databases used by its
+selected modules before starting any workflow tasks, including resumed runs.
+Missing, empty, unreadable or incomplete required assets are reported as
+`[MISSING]` in the main output and recorded in `<output>/start_info.txt`; all
+detected dependency failures are collected before the command exits.
+Disabled annotation modules and reused GTDB-Tk classification results require
+only the databases still used by the selected command.
+
+Startup checks include the legacy CheckM manifest's file sizes, every KOfam
+profile referenced by a usable KO threshold, HMM file headers and terminators,
+nonempty protein sequences in the hydrogenase FASTA,
+and GTDB-Tk's installed release/marker inventory and classification reference
+packages. DIAMOND databases are opened with `diamond dbinfo`; the CheckM2 check
+uses its selected isolated environment. These checks validate required assets
+and database loading; they do not hash every byte of large reference archives.
+
 **What to pass to each option**
 
 These options are configured with `metabaw check`. A directory means the
