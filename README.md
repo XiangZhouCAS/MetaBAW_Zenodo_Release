@@ -85,9 +85,11 @@ Use Linux, WSL2, or an HPC Linux environment for production runs. MetaBAW
 requires Python 3.11. External bioinformatics programs and reference databases
 are not bundled in the wheel.
 
-Conda or a supported compatible frontend is needed for the isolated tool
-environments. CPU execution is supported; NVIDIA GPUs additionally require a
-working driver and compatible CUDA/PyTorch or CuPy runtimes. Reserve adequate
+Conda, Mamba or Micromamba is needed for the isolated tool environments.
+[Miniforge](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html)
+provides both Conda and Mamba. CPU execution is supported; NVIDIA GPUs
+additionally require a working driver and compatible CUDA/PyTorch or CuPy
+runtimes. Reserve adequate
 RAM, database storage and temporary disk space for the selected tools. The
 160 GiB GTDB-Tk classification floor does not apply to every binning task.
 
@@ -106,14 +108,36 @@ The `py3-none-any` filename tag describes the pure-Python package, not support
 for every operating system or Python 3 version. This edition requires Python
 3.11 and Linux-compatible external tools.
 
+Create the main environment with Conda:
+
 ```bash
 conda create -n metabaw python=3.11 pip "setuptools<82"
+```
+
+Alternatively, use Mamba from the same installation:
+
+```bash
+mamba create -n metabaw python=3.11 pip "setuptools<82"
+```
+
+After creating the environment with either command, activate it and install
+the wheel:
+
+```bash
 conda activate metabaw
 python -m pip install ./metabaw-0.1.0-py3-none-any.whl
 
 metabaw --version
 metabaw --help
 ```
+
+For package transactions, `mamba create`, `mamba install` and `mamba update`
+can replace the corresponding Conda commands while keeping the same environment,
+package versions and channels. `conda activate` also works for environments
+created by Mamba in the same installation. If your shell is initialized for
+Mamba, you can use `mamba activate metabaw` instead. See the
+[official Mamba user guide](https://mamba.readthedocs.io/en/latest/user_guide/mamba.html).
+Install the MetaBAW wheel with `python -m pip install` as shown above.
 
 To replace an existing installation of this edition:
 
@@ -854,6 +878,14 @@ main Python runtime. Do not merge incompatible isolated environments into the
 Python 3.11 main environment.
 
 ### Software and environments
+
+For supported dependency installation and isolated-environment setup,
+`metabaw check` automatically selects the first available manager on `PATH`
+in this order: **Mamba, Micromamba, Conda**. Use managers from the same
+installation, or select isolated environments by absolute prefix.
+Keep `conda` available for MetaDecoder's automatic CuPy/CUDA runtime repair
+and for saving GTDB-Tk's `GTDBTK_DATA_PATH` in the Conda environment; these
+operations currently call Conda directly.
 
 | Function | Programs | Environment / assets |
 |---|---|---|
