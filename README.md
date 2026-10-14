@@ -69,10 +69,10 @@ metabaw annotation \
 This example uses the default MAG suffix <code>fa</code>; adjust the <code>find</code> pattern if
 binning used another <code>--mag-suffix</code>. Absolute MAG paths avoid ambiguity when
 moving the list. Annotation enables taxonomy, abundance and all three functional
-annotation branches by default. Niche classification runs only with at least
-four MAGs and four read samples. Newly generated GTDB-Tk classification requires
-a configured memory budget of at least 160 GiB; this is a preflight floor, not
-a prediction of peak memory. See <a href="#taxonomy-and-abundance">taxonomy and abundance</a>
+annotation branches by default. Niche classification requires at least four read samples
+and at least four classified taxa after MAGs are grouped at the selected GTDB-Tk taxonomic rank.
+If this requirement is not met, only niche classification is skipped; the other annotation analyses continue.
+See <a href="#taxonomy-and-abundance">taxonomy and abundance</a>
 for reuse of existing taxonomy and ways to disable optional annotation branches.
 </p>
 
@@ -256,7 +256,13 @@ S4	group2
 Each sample may occur once, and each group must contain at least two samples.
 All samples in one group must have the same read type: all paired short reads or
 all single-file long reads. Group names follow the same naming restrictions as
-sample names. Different groups may use different read types.
+sample names. Different groups may use different read types. MAGs recovered from
+a grouped coassembly are named <group>_<tool>_<number>.fa. For example, a groupA
+MAG recovered by COMEBin is named groupA_comebin_103.fa. The filename does not
+include the list of member samples. Group membership is retained in run_manifest.json
+and coassembly/bin_provenance.tsv. Group names must differ from the names of
+independently processed samples to avoid duplicate MAG filenames.
+
 </p>
 
 ### Grouped-coverage list
@@ -369,7 +375,7 @@ coassembly/assemblies/coassembly_<group>/<group>.contigs.ok.fa
 Its sequence identifiers use `<group>_<number>`. Group bins use:
 
 ```text
-<group>_<sample1>-<sample2>-..._<binner-or-refiner>_<number>.fa
+<group>_<binner-or-refiner>_<number>.fa
 ```
 
 `--assembly-strategy coassembly` requires `--coassembly-file` and cannot be
@@ -603,6 +609,18 @@ The annotation module performs:
 8. Hydrogen-metabolism terminal-enzyme annotation with DIAMOND.
 
 <p align="justify">
+MetaBAW reads genome input lists incrementally and transfers oversized
+internal argument lists through UTF-8 parameter files. Functional annotation
+uses up to 5000 MAGs per batch by default, then merges the results into the
+standard public annotation tables. Completed batch results can be reused during
+continuation. Use --annotation-batch-size to change the batch size. For 50000 MAGs,
+the default produces 10 batches; 50001 MAGs produce 11 batches. CoverM keeps the
+complete reference catalogue, and niche statistics are calculated after taxonomy
+and abundance results are combined across the full cohort. Dereplication remains
+a whole-cohort analysis.
+</p>
+
+<p align="justify">
 KEGG, CAZy, and hydrogen-metabolism annotation are enabled by default. Disable
 them with <code>--no-kegg</code>, <code>--no-cazy</code>, or <code>--no-hyd</code>, respectively. <code>--no-hyd</code>
 disables both hydrogenase and terminal-enzyme annotation.
@@ -620,6 +638,10 @@ were missing. A missing or invalid description file remains an error.
 <p align="justify">
 GTDB-Tk species placement is enabled by default and can be disabled with
 <code>--no-place-species</code>, the only public species-placement switch.
+With species placement enabled, GTDB-Tk processes the complete MAG cohort in
+one run. Classification can be split into MAG batches only when --no-place-species
+is specified; MetaBAW then validates and merges the batch summary tables. This
+option does not batch CoverM profiling, dereplication or niche statistics.
 A complete existing GTDB-Tk result can be reused with:
 </p>
 
@@ -642,6 +664,7 @@ Additional annotation controls include:
 | `--retries` | Retries after an eligible task failure | `0` |
 | `--no-niche` | Disable niche classification | off |
 | `--no-kegg`, `--no-cazy`, `--no-hyd` | Disable the corresponding functional branches | off |
+| `--annotation-batch-size` `N` | Maximum MAGs per functional annotation batch; GTDB-Tk batching requires --no-place-species | 5000 |
 
 Supported abundance methods are:
 
@@ -673,6 +696,14 @@ excluded from genome counts.
 Niche classification runs only when the analysis contains at least four MAGs
 and four read samples. Otherwise it is skipped without blocking other
 annotation steps. Use <code>--no-niche</code> to disable it explicitly.
+Before niche classification, MetaBAW groups MAGs by their GTDB-Tk taxonomy
+at the selected --niche-rank and sums the abundances of MAGs assigned to the
+same taxon. At least four read samples and four classified taxa at that rank
+are required. Unclassified MAGs do not increase the taxon count. For example,
+at family rank, 100 MAGs assigned to three families cannot be classified by niche.
+MetaBAW reports a nonfatal skip, retains the aggregated abundance and
+genome-to-taxon outputs, records the reason, and continues the other
+annotation analyses. Use --no-niche to disable this analysis explicitly.
 </p>
 
 Two criteria are supported:
@@ -713,8 +744,8 @@ highest <code>floor(n_taxa/4)</code> are <code>specialist</code>, and all remain
 The rounding remainder belongs to the intermediate group; fewer than four
 supported taxa therefore produce only intermediate labels. Low-support taxa
 remain <code>unclassified_low_support</code> and are excluded from the ranked population.
-Taxa with identical CVs can receive different labels at a rank boundary: this
-is the explicit stable tie-breaking policy, not a difference in their CVs.
+Taxa with identical `cv` can receive different labels at a rank boundary: this
+is the explicit stable tie-breaking policy, not a difference in their `cv`.
 </p>
 
 <p align="justify">
@@ -741,14 +772,14 @@ of ecological specialization.
 </p>
 
 <p align="justify">
-In <code>occupancy</code> mode, a taxon is detected at a relative abundance of at least
-0.01% and greater than zero in a sample. For other abundance metrics, detection
-uses <code>100 x taxon abundance / total catalogue abundance</code> within each sample;
-CV still uses the native selected metric. Eligible taxa need a positive mean,
-at least 20 assigned reads and occupancy of at least 20% of samples. The current
-CLI treats all samples as one dataset: occupancy &gt;= 80% gives <code>generalist</code>,
-otherwise <code>specialist</code>. This mode does not produce <code>intermediate</code>; use CV mode
-for three-category classification.
+In <code>occupancy</code> mode, a taxon is detected in a sample when its relative abundance
+is at least 0.001%. For other selected abundance metrics, MetaBAW first converts taxon abundance
+to its within-sample percentage for detection. Occupancy (%) is the number of samples in which the
+taxon is detected divided by the total number of samples, multiplied by 100. Eligible classified taxa
+require a positive mean and at least 20 assigned reads. They are ranked by occupancy: the
+lowest <code>floor(n_taxa/4)</code> are <code>specialist</code>, the highest <code>floor(n_taxa/4)</code>
+are <code>generalist</code>, and all remaining taxa are <code>intermediate</code>.
+Stable taxon-name ordering resolves exact ties.
 </p>
 
 Key `niche_classification.tsv` fields are:
@@ -776,12 +807,10 @@ establish that every member MAG has the same independently measured niche.
 </p>
 
 <p align="justify">
-All niche modes use versioned completion markers so resume regenerates old
-table schemas instead of silently reusing them. Unchanged taxonomy and
-abundance tasks can still be reused when their outputs exist. Changing
-<code>--cv-correct</code> for an existing output directory is rejected, like changing the
-niche method or abundance metric: use a new <code>-o</code> directory to keep both runs
-and avoid stale classifications.
+Complete niche outputs can be reused during continuation, including a recorded skip
+because fewer than four classified taxa were found. If the niche method, abundance metric,
+--cv-correct or other analysis settings need to be changed, use a new output directory
+to regenerate the results.
 </p>
 
 ### Functional annotation outputs
@@ -881,22 +910,15 @@ metabaw_annotation_result/
 ### CPU scheduling
 
 <p align="justify">
-<code>-t/--threads</code> is the total workflow CPU budget. <code>--task</code> is the maximum number
-of samples or MAGs processed concurrently. MetaBAW divides the total thread
-budget across active sample slots; it does not multiply <code>-t</code> by <code>--task</code>.
-CPU requests are limited to the permitted CPU affinity/cgroup-quota capacity.
-The 80% safety ceiling applies to RAM and VRAM, not CPU threads.
-This division applies to sample-level MEGAHIT/Flye assembly, mapping, binning and
-refinement. After refined MAGs from all samples are collected, CheckM/CheckM2,
-GUNC, GTDB-Tk domain identification, RNA QC and Galah/dRep use the full
-effective workflow thread budget. For example, <code>--threads 128 --task 4</code>
-allocates 32 threads per sample and 128 threads to each global QC or
-dereplication task, provided the available CPU capacity permits 128 threads. Each global
-task reserves that full budget, so global assessments do not each run with
-128 threads simultaneously. RNA QC divides its global budget among candidate
-MAGs, not original samples. Single-threaded collection, export and report
-helpers still reserve one CPU. MetaWRAP with CheckM reuses its refinement
-quality reports without a redundant global CheckM run.
+<code>-t/--threads</code> is the total workflow CPU budget. In annotation,
+<code>--task</code> limits the number of concurrent read samples or functional
+annotation batches; batched gene prediction uses at most this many concurrent MAG
+workers. At each step, CPU and RAM budgets are divided across <code>min(--task,
+incomplete samples or batches)</code>. For example, with <code>-t 128 --task 4</code>,
+four incomplete functional batches receive 32 CPU threads each; two incomplete batches
+receive 64 each, subject to permitted CPU capacity. Whole-cohort GTDB-Tk classification
+and global binning QC/dereplication reserve the total effective budget. The 80% safety
+ceiling applies to available RAM and free VRAM, not CPU threads.
 </p>
 
 <p align="justify">
@@ -1244,15 +1266,13 @@ Do not run two workflows against the same temporary workspace/state database.
 </p>
 
 <p align="justify">
-Output/temp roots are normalized in portable checkpoints. A directory-name
-change does not rebuild complete indexes, BAMs or bins. Copied generated-file
-timestamps are not identity checks in portable resume: their producer tasks,
-analysis settings, data dependencies and complete expected outputs determine
-reuse. External input paths, sizes and modification times remain checked.
-Internal absolute symlinks and SQLite log locators are rebased into the copied
-tree; external input/database links, sequence data and historical log contents
-are not rewritten. Relative internal links remain relative. The original run
-is not modified. <code>[RESUME]</code> reports <code>relocated</code> cache hits.
+MetaBAW checks each step immediately before execution and reuses complete expected result files.
+Complete downstream results are retained when an upstream step needs to rerun. Private annotation
+intermediates can be skipped when the corresponding final public or batch result tables are complete.
+A failed or interrupted task may still be reused if its expected outputs are complete. Runtime
+budgets and old command/hash/timestamp differences do not by themselves force complete outputs to rerun.
+Changed analysis settings require a fresh output directory to regenerate complete results.
+Database preflight and output/temp workspace locks remain active.
 </p>
 
 Resume decisions distinguish runtime resources from analysis settings:
