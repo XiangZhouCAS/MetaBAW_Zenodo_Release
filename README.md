@@ -1304,3 +1304,6 @@ examples/run.annotation.sh
 
 MetaBAW is distributed under the MIT License. See [LICENSE](LICENSE). External
 programs and reference databases retain their own licenses and usage terms.
+
+## Notice
+If you have any questions about MetaBAW, you can contact me through the email `zhouxiang221@mails.ucas.ac.cn`, thank you very much! :wink:
